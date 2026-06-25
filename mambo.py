@@ -17,6 +17,11 @@ from elftools.elf.sections import SymbolTableSection
 from elftools.elf.relocation import RelocationSection
 import z3
 
+VERSION = "0.1.0"
+DEFAULT_MAX_INPUT = 64
+DEFAULT_MAX_STATES = 1000
+DEFAULT_MAX_STEPS = 10000
+
 
 class MamboError(Exception):
     """An input or execution error that should be shown without a traceback."""
@@ -542,12 +547,13 @@ def printable_payload(payload: bytes) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Find stdin bytes that reach an address in an x86-64 ELF")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--binary", required=True, help="non-PIE x86-64 ELF to analyze")
     parser.add_argument("--start", type=address, help="starting virtual address (for example 0x401176)")
     parser.add_argument("--end", type=address, help="target virtual address")
-    parser.add_argument("--max-input", type=int, default=64, help="maximum symbolic stdin bytes (default: 64)")
-    parser.add_argument("--max-states", type=int, default=1000, help="maximum paths to explore")
-    parser.add_argument("--max-steps", type=int, default=10000, help="maximum instructions per path")
+    parser.add_argument("--max-input", type=int, default=DEFAULT_MAX_INPUT, help="maximum symbolic stdin bytes (default: 64)")
+    parser.add_argument("--max-states", type=int, default=DEFAULT_MAX_STATES, help="maximum paths to explore")
+    parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS, help="maximum instructions per path")
     return parser
 
 
