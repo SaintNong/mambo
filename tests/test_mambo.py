@@ -47,6 +47,16 @@ class MamboEndToEndTests(unittest.TestCase):
         crackme = subprocess.run([str(BINARY)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"Correct Key!\n")
 
+    def test_reports_its_version_without_a_binary(self):
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "mambo.py"), "--version"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertRegex(completed.stdout, r"mambo\.py 0\.1\.0")
+
 
 if __name__ == "__main__":
     unittest.main()
