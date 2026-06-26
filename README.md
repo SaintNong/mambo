@@ -52,6 +52,9 @@ python mambo.py --binary [TARGET_BINARY] --start [START_ADDRESS_HEX] --end [END_
 # Or just 
 python mambo.py --binary [TARGET_BINARY]
 # .. and an interactive CLI will ask you for start and end addresses
+
+# Inspect the installed MVP version
+python mambo.py --version
 ```
 
 Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local
