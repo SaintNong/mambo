@@ -496,6 +496,30 @@ class SymbolicExecutor:
                 "xor": left ^ right,
             }
             self.write_operand(state, insn, operands[0], operations[mnemonic])
+        elif mnemonic == "imul":
+            if len(operands) == 2:
+                left = self.read_operand(state, insn, operands[0])
+                right = resize(self.read_operand(state, insn, operands[1]), left.size())
+            elif len(operands) == 3:
+                left = self.read_operand(state, insn, operands[1])
+                right = resize(self.read_operand(state, insn, operands[2]), left.size())
+            else:
+                raise MamboError(f"unsupported imul form: {insn.op_str}")
+            self.write_operand(state, insn, operands[0], left * right)
+        elif mnemonic in {"shl", "sal", "shr", "sar", "rol", "ror"}:
+            value = self.read_operand(state, insn, operands[0])
+            count = concrete(self.read_operand(state, insn, operands[1]), "shift count")
+            if mnemonic in {"shl", "sal"}:
+                result = value << count
+            elif mnemonic == "shr":
+                result = z3.LShR(value, count)
+            elif mnemonic == "sar":
+                result = value >> count
+            elif mnemonic == "rol":
+                result = z3.RotateLeft(value, count)
+            else:
+                result = z3.RotateRight(value, count)
+            self.write_operand(state, insn, operands[0], result)
         elif mnemonic in {"inc", "dec"}:
             value = self.read_operand(state, insn, operands[0])
             self.write_operand(state, insn, operands[0], value + (1 if mnemonic == "inc" else -1))
