@@ -47,6 +47,32 @@ class MamboEndToEndTests(unittest.TestCase):
         crackme = subprocess.run([str(BINARY)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"Correct Key!\n")
 
+    def test_solves_looping_custom_hash(self):
+        binary = ROOT / "examples" / "hash_crackme"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                str(binary),
+                "--start",
+                symbol_address(binary, "main"),
+                "--end",
+                symbol_address(binary, "mambo_hash_success"),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        match = re.search(r"Payload \(hex\): ([0-9a-f]+)", completed.stdout)
+        self.assertIsNotNone(match, completed.stdout)
+        payload = bytes.fromhex(match.group(1))
+        self.assertEqual(len(payload), 6)
+
+        crackme = subprocess.run([str(binary)], input=payload, capture_output=True, check=True)
+        self.assertEqual(crackme.stdout, b"Hash accepted!\n")
+
     def test_reports_its_version_without_a_binary(self):
         completed = subprocess.run(
             [sys.executable, str(ROOT / "mambo.py"), "--version"],
