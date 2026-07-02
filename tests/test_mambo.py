@@ -83,6 +83,25 @@ class MamboEndToEndTests(unittest.TestCase):
         )
         self.assertRegex(completed.stdout, r"mambo\.py 0\.1\.0")
 
+    def test_rejects_pie_binary(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                "/bin/ls",
+                "--start",
+                "0x1",
+                "--end",
+                "0x2",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("PIE binaries are not supported", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
