@@ -60,7 +60,8 @@ python mambo.py --version
 Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local
 memory, direct calls/returns, comparisons and conditional jumps, plus symbolic
 stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write`
-and `puts` are safely skipped.
+and `puts` are safely skipped. It also supports the arithmetic used by the
+included hash fixture: addition, XOR, multiplication, shifts, and rotations.
 
 The included examples can be exercised using their named symbols:
 
@@ -68,6 +69,10 @@ The included examples can be exercised using their named symbols:
 START=0x$(nm examples/simple_crackme | awk '$3 == "main" {print $1}')
 END=0x$(nm examples/simple_crackme | awk '$3 == "mambo_success" {print $1}')
 .venv/bin/python mambo.py --binary examples/simple_crackme --start "$START" --end "$END"
+
+START=0x$(nm examples/hash_crackme | awk '$3 == "main" {print $1}')
+END=0x$(nm examples/hash_crackme | awk '$3 == "mambo_hash_success" {print $1}')
+.venv/bin/python mambo.py --binary examples/hash_crackme --start "$START" --end "$END"
 
 ```
 
