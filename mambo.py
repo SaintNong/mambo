@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import string
 import sys
 from dataclasses import dataclass, field
@@ -578,6 +579,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-input", type=int, default=DEFAULT_MAX_INPUT, help="maximum symbolic stdin bytes (default: 64)")
     parser.add_argument("--max-states", type=int, default=DEFAULT_MAX_STATES, help="maximum paths to explore")
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS, help="maximum instructions per path")
+    parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     return parser
 
 
@@ -608,10 +610,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if result is None:
         print("No satisfiable path found within the execution limits.")
         return 1
-    print(f"Reached 0x{args.end:x}")
-    print(f"Payload (hex): {result.payload.hex()}")
-    print(f"Payload (ASCII): {printable_payload(result.payload)}")
-    print(f"Explored states: {result.explored_states}; executed instructions: {result.executed_instructions}")
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "end": f"0x{args.end:x}",
+                    "payload_hex": result.payload.hex(),
+                    "payload_ascii": printable_payload(result.payload),
+                    "explored_states": result.explored_states,
+                    "executed_instructions": result.executed_instructions,
+                }
+            )
+        )
+    else:
+        print(f"Reached 0x{args.end:x}")
+        print(f"Payload (hex): {result.payload.hex()}")
+        print(f"Payload (ASCII): {printable_payload(result.payload)}")
+        print(f"Explored states: {result.explored_states}; executed instructions: {result.executed_instructions}")
     return 0
 
 
