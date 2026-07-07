@@ -1,4 +1,5 @@
 import re
+import json
 import subprocess
 import sys
 import unittest
@@ -82,6 +83,28 @@ class MamboEndToEndTests(unittest.TestCase):
             capture_output=True,
         )
         self.assertRegex(completed.stdout, r"mambo\.py 0\.1\.0")
+
+    def test_emits_json_for_automation(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--json",
+                "--binary",
+                str(BINARY),
+                "--start",
+                symbol_address(BINARY, "main"),
+                "--end",
+                symbol_address(BINARY, "mambo_success"),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["payload_hex"], "4d414d424f")
+        self.assertIn("explored_states", result)
 
     def test_rejects_pie_binary(self):
         completed = subprocess.run(
