@@ -70,6 +70,9 @@ START=0x$(nm examples/simple_crackme | awk '$3 == "main" {print $1}')
 END=0x$(nm examples/simple_crackme | awk '$3 == "mambo_success" {print $1}')
 .venv/bin/python mambo.py --binary examples/simple_crackme --start "$START" --end "$END"
 
+# Emit the satisfying payload as one JSON object for scripts
+.venv/bin/python mambo.py --json --binary examples/simple_crackme --start "$START" --end "$END"
+
 START=0x$(nm examples/hash_crackme | awk '$3 == "main" {print $1}')
 END=0x$(nm examples/hash_crackme | awk '$3 == "mambo_hash_success" {print $1}')
 .venv/bin/python mambo.py --binary examples/hash_crackme --start "$START" --end "$END"
