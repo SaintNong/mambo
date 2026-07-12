@@ -106,6 +106,18 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertEqual(result["payload_hex"], "4d414d424f")
         self.assertIn("explored_states", result)
 
+    def test_prompts_for_missing_start_and_end_addresses(self):
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "mambo.py"), "--binary", str(BINARY)],
+            cwd=ROOT,
+            input=f"{symbol_address(BINARY, 'main')}\n{symbol_address(BINARY, 'mambo_success')}\n",
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("Start address: End address:", completed.stdout)
+        self.assertIn("Payload (hex): 4d414d424f", completed.stdout)
+
     def test_rejects_pie_binary(self):
         completed = subprocess.run(
             [
