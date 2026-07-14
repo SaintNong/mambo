@@ -137,6 +137,27 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("PIE binaries are not supported", completed.stderr)
 
+    def test_rejects_non_positive_execution_limits(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                str(BINARY),
+                "--start",
+                symbol_address(BINARY, "main"),
+                "--end",
+                symbol_address(BINARY, "mambo_success"),
+                "--max-steps",
+                "0",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("execution limits must be positive", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
