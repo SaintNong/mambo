@@ -2,6 +2,7 @@
 
 <div align="center">
   <img src="img/mambo.jpg" alt="beautiful mambo">
+  <img src="img/mambo2.jpg" alt="beautiful mambo x2">
 </div>
 
 Mambo is a lightweight symbolic execution engine.
