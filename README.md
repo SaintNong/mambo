@@ -47,6 +47,20 @@ python mambo.py --version
 
 Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are safely skipped. It also supports the arithmetic used by the included hash fixture: addition, XOR, multiplication, shifts, and rotations.
 
+### Python API
+
+Use `Mambo` directly when embedding the solver in another tool. `run()` (or its `solve()` alias) returns an `ExecutionResult`, or `None` when no satisfiable path is found within the configured limits.
+
+```python
+from mambo import Mambo
+
+result = Mambo("examples/simple_crackme", 0x401175, 0x401156).solve()
+if result is not None:
+    print(result.payload)
+```
+
+The `Mambo` constructor accepts the same `max_input`, `max_states`, and `max_steps` limits as the CLI. Invalid input, binary, and executor conditions raise `MamboError`.
+
 The included examples can be exercised using their named symbols:
 
 ```bash

@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from mambo import Mambo, MamboError
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "examples" / "simple_crackme"
@@ -157,6 +159,27 @@ class MamboEndToEndTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 2)
         self.assertIn("execution limits must be positive", completed.stderr)
+
+
+class MamboApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        subprocess.run(["make", "all"], cwd=ROOT, check=True)
+
+    def test_solves_through_the_public_api(self):
+        result = Mambo(
+            BINARY,
+            int(symbol_address(BINARY, "main"), 0),
+            int(symbol_address(BINARY, "mambo_success"), 0),
+        ).solve()
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.payload, b"MAMBO")
+        self.assertGreater(result.explored_states, 0)
+
+    def test_public_api_validates_execution_limits(self):
+        with self.assertRaisesRegex(MamboError, "execution limits must be positive"):
+            Mambo(BINARY, 0, 0, max_steps=0)
 
 
 if __name__ == "__main__":
