@@ -4,33 +4,33 @@
   <img src="img/mambo.jpg" alt="beautiful mambo">
 </div>
 
-Mambo is a lightweight Python-based binary analysis framework designed for basic symbolic execution tasks.
+Mambo is a lightweight symbolic execution engine.
 Mainly made as a learning project, though intended to be useful to CTF players.
 
 ## technology stack
 
-Mambo at it's core is a combination of the following two libraries:
+Mambo at its core is a combination of the following two libraries:
 - z3 for solving
 - capstone for reading ELFs
 
-> (it also has pyelftools but that's for loading the binary.)
+> (it also has pyelftools but that's for loading the binary sections.)
 
 ## What does this do?
 
 Mambo's primary function is basically angr but easier, from a CTF player perspective.
 
-* You only really need three things to get started:
+You only really need three things to get started:
+
 1. A binary.
 2. The memory **start address** from which to begin exploration.
 3. The memory **end address** where we want to end up.
 
-* If a path is found that connects your start and end addresses, Mambo solves the gathered constraints to provide the exact `stdin` payload required to reach the target.
-
+If a path is found that connects your start and end addresses, Mambo solves the gathered constraints to provide the exact `stdin` payload required to reach the target.
 
 
 ## Usage
 
-Using Mambo is straightforward. Provide the target binary and the hexadecimal start and end memory addresses of the functions or code blocks you are interested in.
+Using Mambo is easy. Provide the target binary and the hexadecimal start and end memory addresses of the functions or code blocks you are interested in.
 
 ### Commands
 
@@ -40,14 +40,13 @@ python mambo.py --binary [TARGET_BINARY] --start [START_ADDRESS_HEX] --end [END_
 # Or just 
 python mambo.py --binary [TARGET_BINARY]
 # .. and an interactive CLI will ask you for start and end addresses
-
-# Inspect the installed MVP version
-python mambo.py --version
 ```
 
 Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are safely skipped. It also supports the arithmetic used by the included hash fixture: addition, XOR, multiplication, shifts, and rotations.
 
 ### Python API
+
+> if anyone ever uses this please message me on discord because that would be hilarious (don't use this, get help)
 
 Use `Mambo` directly when embedding the solver in another tool. `run()` (or its `solve()` alias) returns an `ExecutionResult`, or `None` when no satisfiable path is found within the configured limits.
 
