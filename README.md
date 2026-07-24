@@ -14,9 +14,9 @@ Mainly made as a learning project, though intended to be useful to CTF players.
 
 Mambo at its core is a combination of the following two libraries:
 - z3 for solving
-- capstone for reading ELFs
+- capstone for disassembling machine code
 
-> (it also has pyelftools but that's for loading the binary sections.)
+> (it also uses pyelftools to parse ELF files and load their sections.)
 
 ## What does this do?
 
@@ -45,7 +45,7 @@ python mambo.py --binary [TARGET_BINARY]
 # .. and an interactive CLI will ask you for start and end addresses
 ```
 
-Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are safely skipped. It also supports the arithmetic used by the included hash fixture: addition, XOR, multiplication, shifts, and rotations.
+Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are modeled as no-ops that return zero; their stdout is not captured during analysis. It supports the following arithmetic operations: addition, XOR, multiplication, shifts, and rotations.
 
 ### Python API
 
@@ -100,3 +100,29 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 make
 ```
+
+## Limitations
+
+### Supported
+
+- Non-PIE x86-64 ELF binaries
+- Stack-local and mapped ELF memory
+- Direct `call`, `ret`, `jmp`, and conditional jumps (`je`/`jne` and signed or unsigned relational variants)
+- Basic data movement: `mov`, `movzx`, `movsx`, `movsxd`, and `lea`
+- Stack and control instructions: `push`, `pop`, `leave`, `nop`, and `endbr64`
+- Integer operations: `add`, `sub`, `and`, `or`, `xor`, `imul`, `inc`, `dec`, shifts, and rotates
+- Comparisons with `cmp` and `test`
+- Symbolic input from `read`, `gets`, `fgets`, and `getchar`
+- Common output functions such as `write`, `puts`, `printf`, and `putchar` are modeled as no-ops returning zero
+
+### Not supported
+
+- stdout is not captured
+- PIE or non-x86-64 binaries
+- Heap allocation, `malloc` and `free`
+- Indirect or unresolved calls
+- Symbolic memory addresses
+- Full operating-system or library behavior
+- Other x86-64 instructions, including `setcc`, `cmovcc`, `mul`/`div`, string instructions, SIMD instructions, and system calls
+
+Keep in mind that not finding a path does not prove that no path exists.
