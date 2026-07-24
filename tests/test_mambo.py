@@ -72,6 +72,7 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertIsNotNone(match, completed.stdout)
         payload = bytes.fromhex(match.group(1))
         self.assertEqual(len(payload), 6)
+        self.assertTrue(payload.isalnum())
 
         crackme = subprocess.run([str(binary)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"You guessed the password? No way\nHash accepted!\n")

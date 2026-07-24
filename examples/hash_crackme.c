@@ -21,11 +21,23 @@ int main(void) {
 
     if (fgets((char *)key, sizeof(key), stdin) == NULL)
         return 1;
-    // guess the key
-    if (mambo_hash(key, sizeof(key)) != 0x34999475U) {
+
+    if (mambo_hash(key, sizeof(key) - 1) != 0x72891045U) {
         puts ("wrong");
         return 1;
     } else {
+        // ensure password \in printable alphanumeric, for the demo
+        for (size_t index = 0; index < sizeof(key) - 1; ++index) {
+            unsigned char byte = key[index];
+
+            if (!((byte >= '0' && byte <= '9') ||
+                  (byte >= 'A' && byte <= 'Z') ||
+                  (byte >= 'a' && byte <= 'z'))) {
+                puts ("wrong");
+                return 1;
+            }
+        }
+
         puts("You guessed the password? No way");
 
         mambo_hash_success();
