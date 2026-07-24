@@ -25,20 +25,23 @@ Mambo's primary function is basically angr but easier, from a CTF player perspec
 You only really need three things to get started:
 
 1. A binary.
-2. The memory **start address** from which to begin exploration.
-3. The memory **end address** where we want to end up.
+2. The **start address** or symbol from which to begin exploration.
+3. The **end address** or symbol where we want to end up.
 
 If a path is found that connects your start and end addresses, Mambo solves the gathered constraints to provide the exact `stdin` payload required to reach the target.
 
 
 ## Usage
 
-Using Mambo is easy. Provide the target binary and the hexadecimal start and end memory addresses of the functions or code blocks you are interested in.
+Using Mambo is easy. Provide the target binary and either the hexadecimal start and end addresses or the corresponding symbol names.
 
 ### Commands
 
 ```bash
 python mambo.py --binary [TARGET_BINARY] --start [START_ADDRESS_HEX] --end [END_ADDRESS_HEX]
+
+# Or use symbol names
+python mambo.py --binary [TARGET_BINARY] --start-symbol [START_SYMBOL] --end-symbol [END_SYMBOL]
 
 # Or just 
 python mambo.py --binary [TARGET_BINARY]
@@ -56,9 +59,13 @@ Use `Mambo` directly when embedding the solver in another tool. `solve()` return
 ```python
 from mambo import Mambo
 
-result = Mambo("examples/simple_crackme", 0x401175, 0x401156).solve()
+solver = Mambo("examples/simple_crackme")
+result = solver.solve(0x40116b, 0x401156)
 if result is not None:
     print(result.payload)
+
+# Symbol names can be used instead
+result = solver.solve_symbols("main", "mambo_success")
 ```
 
 The `Mambo` constructor accepts the same `max_input`, `max_states`, and `max_steps` limits as the CLI. Invalid input, binary, and executor conditions raise `MamboError`.
@@ -66,17 +73,12 @@ The `Mambo` constructor accepts the same `max_input`, `max_states`, and `max_ste
 The included examples can be exercised using their named symbols:
 
 ```bash
-# Find start and end addresses
-START=0x$(nm examples/simple_crackme | awk '$3 == "main" {print $1}')
-END=0x$(nm examples/simple_crackme | awk '$3 == "mambo_success" {print $1}')
-.venv/bin/python mambo.py --binary examples/simple_crackme --start "$START" --end "$END"
+.venv/bin/python mambo.py --binary examples/simple_crackme --start-symbol main --end-symbol mambo_success
 
 # Emit the satisfying payload as one JSON object for scripts
-.venv/bin/python mambo.py --json --binary examples/simple_crackme --start "$START" --end "$END"
+.venv/bin/python mambo.py --json --binary examples/simple_crackme --start-symbol main --end-symbol mambo_success
 
-START=0x$(nm examples/hash_crackme | awk '$3 == "main" {print $1}')
-END=0x$(nm examples/hash_crackme | awk '$3 == "mambo_hash_success" {print $1}')
-.venv/bin/python mambo.py --binary examples/hash_crackme --start "$START" --end "$END"
+.venv/bin/python mambo.py --binary examples/hash_crackme --start-symbol main --end-symbol mambo_hash_success
 
 ```
 

@@ -32,10 +32,10 @@ class MamboEndToEndTests(unittest.TestCase):
                 str(ROOT / "mambo.py"),
                 "--binary",
                 str(BINARY),
-                "--start",
-                symbol_address(BINARY, "main"),
-                "--end",
-                symbol_address(BINARY, "mambo_success"),
+                "--start-symbol",
+                "main",
+                "--end-symbol",
+                "mambo_success",
             ],
             cwd=ROOT,
             check=True,
@@ -168,19 +168,24 @@ class MamboApiTests(unittest.TestCase):
         subprocess.run(["make", "all"], cwd=ROOT, check=True)
 
     def test_solves_through_the_public_api(self):
-        result = Mambo(
-            BINARY,
+        result = Mambo(BINARY).solve(
             int(symbol_address(BINARY, "main"), 0),
             int(symbol_address(BINARY, "mambo_success"), 0),
-        ).solve()
+        )
 
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")
         self.assertGreater(result.explored_states, 0)
 
+    def test_solves_named_symbols_through_the_public_api(self):
+        result = Mambo(BINARY).solve_symbols("main", "mambo_success")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.payload, b"MAMBO")
+
     def test_public_api_validates_execution_limits(self):
         with self.assertRaisesRegex(MamboError, "execution limits must be positive"):
-            Mambo(BINARY, 0, 0, max_steps=0)
+            Mambo(BINARY, max_steps=0)
 
 
 if __name__ == "__main__":

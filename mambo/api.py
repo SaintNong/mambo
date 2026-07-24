@@ -20,8 +20,6 @@ class Mambo:
 
     Args:
         binary: Path to a non-PIE x86-64 ELF binary.
-        start: Virtual address at which to start execution.
-        end: Virtual address to reach.
         max_input: Maximum number of symbolic stdin bytes.
         max_states: Maximum number of paths to explore.
         max_steps: Maximum instructions executed by each path.
@@ -30,8 +28,6 @@ class Mambo:
     def __init__(
         self,
         binary: str | Path,
-        start: int,
-        end: int,
         *,
         max_input: int = DEFAULT_MAX_INPUT,
         max_states: int = DEFAULT_MAX_STATES,
@@ -40,20 +36,26 @@ class Mambo:
         if max_input < 1 or max_states < 1 or max_steps < 1:
             raise MamboError("execution limits must be positive")
         self.binary = Path(binary)
-        self.start = start
-        self.end = end
         self.max_input = max_input
         self.max_states = max_states
         self.max_steps = max_steps
+        self.image = ELFImage(self.binary)
 
-    def solve(self) -> Optional[ExecutionResult]:
+    def solve(self, start: int, end: int) -> Optional[ExecutionResult]:
         """Solve the bounded path exploration, or return ``None`` if no path is found."""
-        image = ELFImage(self.binary)
         return SymbolicExecutor(
-            image,
-            self.start,
-            self.end,
+            self.image,
+            start,
+            end,
             max_input=self.max_input,
             max_states=self.max_states,
             max_steps=self.max_steps,
         ).execute()
+
+    def symbol_address(self, name: str) -> int:
+        """Resolve a symbol name to its unique executable address."""
+        return self.image.symbol_address(name)
+
+    def solve_symbols(self, start: str, end: str) -> Optional[ExecutionResult]:
+        """Solve a path between two named executable symbols."""
+        return self.solve(self.symbol_address(start), self.symbol_address(end))

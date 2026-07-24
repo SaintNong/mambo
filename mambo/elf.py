@@ -25,6 +25,7 @@ class ELFImage:
 
         self.segments: List[Segment] = []
         self.symbols: Dict[int, str] = {}
+        self.symbol_addresses: Dict[str, List[int]] = {}
         self.hooks: Dict[int, str] = {}
 
         with self.path.open("rb") as stream:
@@ -51,8 +52,27 @@ class ELFImage:
                         address = int(symbol["st_value"])
                         if address and symbol.name:
                             self.symbols.setdefault(address, symbol.name)
+                            self.symbol_addresses.setdefault(symbol.name, []).append(address)
 
             self._load_plt_hooks(elf)
+
+        self.symbol_addresses = {
+            name: sorted(set(addresses))
+            for name, addresses in self.symbol_addresses.items()
+        }
+
+    def symbol_address(self, name: str) -> int:
+        """Return the unique executable address for a symbol name."""
+        addresses = self.symbol_addresses.get(name, [])
+        if not addresses:
+            raise MamboError(f"symbol not found: {name}")
+        if len(addresses) > 1:
+            formatted = ", ".join(f"0x{address:x}" for address in addresses)
+            raise MamboError(f"symbol {name!r} is ambiguous: {formatted}")
+        address = addresses[0]
+        if not self.is_executable(address):
+            raise MamboError(f"symbol {name!r} is not executable")
+        return address
 
     def _load_plt_hooks(self, elf: ELFFile) -> None:
         relocations: List[str] = []

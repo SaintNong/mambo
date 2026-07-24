@@ -31,8 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Find stdin bytes that reach an address in an x86-64 ELF")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--binary", required=True, help="non-PIE x86-64 ELF to analyze")
-    parser.add_argument("--start", type=address, help="starting virtual address (for example 0x401176)")
-    parser.add_argument("--end", type=address, help="target virtual address")
+    start = parser.add_mutually_exclusive_group()
+    start.add_argument("--start", type=address, help="starting virtual address (for example 0x401176)")
+    start.add_argument("--start-symbol", help="starting symbol name")
+    end = parser.add_mutually_exclusive_group()
+    end.add_argument("--end", type=address, help="target virtual address")
+    end.add_argument("--end-symbol", help="target symbol name")
     parser.add_argument("--max-input", type=int, default=DEFAULT_MAX_INPUT, help="maximum symbolic stdin bytes (default: 64)")
     parser.add_argument("--max-states", type=int, default=DEFAULT_MAX_STATES, help="maximum paths to explore")
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS, help="maximum instructions per path")
@@ -41,21 +45,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.start is None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if (args.start_symbol is None) != (args.end_symbol is None):
+        parser.error("--start-symbol and --end-symbol must be used together")
+
+    if args.start is None and args.start_symbol is None:
         args.start = address(input("Start address: ").strip())
-    if args.end is None:
+    if args.end is None and args.end_symbol is None:
         args.end = address(input("End address: ").strip())
 
     try:
-        result = Mambo(
+        solver = Mambo(
             args.binary,
-            args.start,
-            args.end,
             max_input=args.max_input,
             max_states=args.max_states,
             max_steps=args.max_steps,
-        ).solve()
+        )
+        if args.start_symbol is not None:
+            args.start = solver.symbol_address(args.start_symbol)
+            args.end = solver.symbol_address(args.end_symbol)
+        result = solver.solve(args.start, args.end)
     except (MamboError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
