@@ -55,7 +55,7 @@ def resize(value: z3.BitVecRef, width: int, signed: bool = False) -> z3.BitVecRe
 def concrete(value: z3.BitVecRef, what: str) -> int:
     simplified = z3.simplify(value)
     if not z3.is_bv_value(simplified):
-        raise MamboError(f"symbolic {what} is outside the MVP's supported subset")
+        raise MamboError(f"symbolic {what} is outside our supported set")
     return simplified.as_long()
 
 
