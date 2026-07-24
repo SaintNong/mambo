@@ -281,7 +281,7 @@ class SymbolicExecutor:
         payload = bytes(model.eval(self.symbolic_byte(index), model_completion=True).as_long() for index in range(state.input_count))
         return ExecutionResult(payload, state.constraints, explored, self.executed)
 
-    def run(self) -> Optional[ExecutionResult]:
+    def execute(self) -> Optional[ExecutionResult]:
         pending, explored = [self.initial_state()], 0
         while pending and explored < self.max_states:
             state = pending.pop(); explored += 1

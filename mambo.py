@@ -55,7 +55,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             max_input=args.max_input,
             max_states=args.max_states,
             max_steps=args.max_steps,
-        ).run()
+        ).solve()
     except (MamboError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

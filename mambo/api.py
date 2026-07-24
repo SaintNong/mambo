@@ -46,8 +46,8 @@ class Mambo:
         self.max_states = max_states
         self.max_steps = max_steps
 
-    def run(self) -> Optional[ExecutionResult]:
-        """Execute the bounded path exploration, or return ``None`` if no path is found."""
+    def solve(self) -> Optional[ExecutionResult]:
+        """Solve the bounded path exploration, or return ``None`` if no path is found."""
         image = ELFImage(self.binary)
         return SymbolicExecutor(
             image,
@@ -56,8 +56,4 @@ class Mambo:
             max_input=self.max_input,
             max_states=self.max_states,
             max_steps=self.max_steps,
-        ).run()
-
-    def solve(self) -> Optional[ExecutionResult]:
-        """Alias for :meth:`run` for users phrasing analysis as a solve operation."""
-        return self.run()
+        ).execute()

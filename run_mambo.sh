@@ -1,5 +1,6 @@
 #!/usr/bin/env basha
-# simple shell script to run mambo from start -> end function
+# simple shell script to tell mambo to solve the path from
+# start_func to end_function
 
 if [[ $# -lt 3 ]]; then
     echo "Usage: $0 <binary> <start-function> <end-function>" >&2

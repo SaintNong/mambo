@@ -51,7 +51,7 @@ Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memor
 
 > if anyone ever uses this please message me on discord because that would be hilarious (don't use this, get help)
 
-Use `Mambo` directly when embedding the solver in another tool. `run()` (or its `solve()` alias) returns an `ExecutionResult`, or `None` when no satisfiable path is found within the configured limits.
+Use `Mambo` directly when embedding the solver in another tool. `solve()` returns an `ExecutionResult`, or `None` when no satisfiable path is found within the configured limits.
 
 ```python
 from mambo import Mambo
@@ -80,7 +80,7 @@ END=0x$(nm examples/hash_crackme | awk '$3 == "mambo_hash_success" {print $1}')
 
 ```
 
-Run our test suite with:
+Test the project with:
 
 ```bash
 make test PYTHON=.venv/bin/python
