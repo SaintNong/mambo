@@ -1,5 +1,7 @@
 # Mambo
 
+[![Tests](https://github.com/SaintNong/mambo/actions/workflows/test.yml/badge.svg)](https://github.com/SaintNong/mambo/actions/workflows/test.yml)
+
 <div align="center">
   <img src="img/mambo.jpg" alt="beautiful mambo" width="35%">
   <img src="img/mambo2.jpg" alt="beautiful mambo x2" width="45%">
