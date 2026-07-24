@@ -13,13 +13,47 @@ from .elf import ELFImage
 from .errors import MamboError
 from .models import ExecutionResult, State
 
+# MAP: conditional mnemonics -> function(left, right)
+EQUALITY_CONDITIONS = {
+    "je": lambda l, r: l == r,
+    "jz": lambda l, r: l == r,
+    "jne": lambda l, r: l != r,
+    "jnz": lambda l, r: l != r,
+}
 
+SIGNED_CONDITIONS = {
+    "jl": lambda l, r: l < r,
+    "jnge": lambda l, r: l < r,
+    "jle": lambda l, r: l <= r,
+    "jng": lambda l, r: l <= r,
+    "jg": lambda l, r: l > r,
+    "jnle": lambda l, r: l > r,
+    "jge": lambda l, r: l >= r,
+    "jnl": lambda l, r: l >= r,
+}
+
+UNSIGNED_CONDITIONS = {
+    "jb": z3.ULT,
+    "jnae": z3.ULT,
+    "jc": z3.ULT,
+    "jbe": z3.ULE,
+    "jna": z3.ULE,
+    "ja": z3.UGT,
+    "jnbe": z3.UGT,
+    "jae": z3.UGE,
+    "jnb": z3.UGE,
+    "jnc": z3.UGE,
+}
+
+# MAP: Register name -> 64-bit family name, visible width, LSB offset
+# lets executor model aliases like `eax` and `al` while storing one 64-bit value per register family
 REGISTER_PARTS: Dict[str, Tuple[str, int, int]] = {}
 
 
 def _register_family(
     base: str, dword: str, word: str, low: str, high: Optional[str] = None
 ) -> None:
+    # register the alias to our global map
     REGISTER_PARTS[base] = (base, 64, 0)
     REGISTER_PARTS[dword] = (base, 32, 0)
     REGISTER_PARTS[word] = (base, 16, 0)
@@ -42,10 +76,12 @@ REGISTER_PARTS["rip"] = ("rip", 64, 0)
 
 
 def bv(value: int, width: int) -> z3.BitVecRef:
+    # Create z3 width-bit value, wraps integers to width
     return z3.BitVecVal(value % (1 << width), width)
 
 
 def resize(value: z3.BitVecRef, width: int, signed: bool = False) -> z3.BitVecRef:
+    # resize bit-vector by truncating or zero/sign-extending
     current = value.size()
     if current == width:
         return value
@@ -56,6 +92,8 @@ def resize(value: z3.BitVecRef, width: int, signed: bool = False) -> z3.BitVecRe
 
 
 def concrete(value: z3.BitVecRef, what: str) -> int:
+    # Return concrete bit vector value, using z3 to simplify.
+    # Function also catches and reports unsupported use.
     simplified = z3.simplify(value)
     if not z3.is_bv_value(simplified):
         raise MamboError(f"symbolic {what} is outside our supported set")
@@ -63,7 +101,7 @@ def concrete(value: z3.BitVecRef, what: str) -> int:
 
 
 class SymbolicExecutor:
-    """A bounded path explorer for x86-64 elf files."""
+    """Explores bounded, satisfiable x86-64 paths between two addresses"""
 
     INPUT_HOOKS = {"read", "__read_chk", "gets", "fgets", "getchar"}
     OUTPUT_HOOKS = {"write", "puts", "printf", "__printf_chk", "putchar"}
@@ -94,6 +132,7 @@ class SymbolicExecutor:
         self.executed = 0
 
     def initial_state(self) -> State:
+        """returns a starting CPU state"""
         registers = {
             name: bv(0, 64) for name, width, _ in REGISTER_PARTS.values() if width == 64
         }
@@ -105,6 +144,7 @@ class SymbolicExecutor:
         return state
 
     def decode(self, address: int):
+        """decode one instruction at an address."""
         try:
             data = self.image.read(address, 15)
         except MamboError:
@@ -112,14 +152,21 @@ class SymbolicExecutor:
         return next(self.md.disasm(data, address, count=1), None)
 
     def read_register(self, state: State, name: str) -> z3.BitVecRef:
+        """read a register or one of its aliases."""
         try:
             base, width, offset = REGISTER_PARTS[name]
         except KeyError as exc:
             raise MamboError(f"unsupported register {name}") from exc
         value = state.registers.get(base, bv(0, 64))
-        return value if width == 64 else z3.Extract(offset + width - 1, offset, value)
+
+        return (
+            value
+            if width == 64
+            else z3.Extract(offset + width - 1, offset, value)
+        )
 
     def write_register(self, state: State, name: str, value: z3.BitVecRef) -> None:
+        """write a value to a register or one of its aliases."""
         base, width, offset = REGISTER_PARTS[name]
         value = resize(value, width)
         if width == 64:
@@ -136,10 +183,13 @@ class SymbolicExecutor:
             if offset:
                 pieces.append(z3.Extract(offset - 1, 0, old))
             state.registers[base] = (
-                pieces[0] if len(pieces) == 1 else z3.Concat(*pieces)
+                pieces[0]
+                if len(pieces) == 1
+                else z3.Concat(*pieces)
             )
 
     def memory_address(self, state: State, insn, operand) -> int:
+        """memory address resolver"""
         address = operand.mem.disp
         if operand.mem.base:
             base_name = insn.reg_name(operand.mem.base)
@@ -159,6 +209,7 @@ class SymbolicExecutor:
         return address & ((1 << 64) - 1)
 
     def read_memory(self, state: State, address: int, size: int) -> z3.BitVecRef:
+        """read a little-endian value from memory."""
         parts = []
         for offset in reversed(range(size)):
             byte_value = state.memory.get(address + offset)
@@ -171,6 +222,7 @@ class SymbolicExecutor:
     def write_memory(
         state: State, address: int, value: z3.BitVecRef, size: int
     ) -> None:
+        """write a little-endian value to memory."""
         value = resize(value, size * 8)
         for offset in range(size):
             state.memory[address + offset] = z3.Extract(
@@ -178,6 +230,7 @@ class SymbolicExecutor:
             )
 
     def read_operand(self, state: State, insn, operand) -> z3.BitVecRef:
+        """read operand -> z3 bit-vector."""
         width = operand.size * 8
         if operand.type == X86_OP_REG:
             return self.read_register(state, insn.reg_name(operand.reg))
@@ -190,6 +243,7 @@ class SymbolicExecutor:
         raise MamboError(f"unsupported operand in '{insn.mnemonic} {insn.op_str}'")
 
     def write_operand(self, state: State, insn, operand, value: z3.BitVecRef) -> None:
+        """write bit-vector to register or memory destination."""
         if operand.type == X86_OP_REG:
             self.write_register(state, insn.reg_name(operand.reg), value)
         elif operand.type == X86_OP_MEM:
@@ -208,56 +262,38 @@ class SymbolicExecutor:
         return solver.check() == z3.sat
 
     def condition(self, mnemonic: str, comparison) -> z3.BoolRef:
+        """Convert x86-64 conditional jump to z3 boolean constraint."""
         if comparison is None:
             raise MamboError(f"conditional jump {mnemonic} has no modeled cmp/test")
+
+        # unpack
         kind, left, right = comparison
-        equal = left == right
-        conditions = {
-            "je": equal,
-            "jz": equal,
-            "jne": z3.Not(equal),
-            "jnz": z3.Not(equal),
-        }
-        if mnemonic in conditions:
-            return conditions[mnemonic]
+
+        if mnemonic in EQUALITY_CONDITIONS:
+            return EQUALITY_CONDITIONS[mnemonic](left, right)
+
         if kind == "test":
             raise MamboError(f"unsupported flag use after test: {mnemonic}")
-        signed = {
-            "jl": left < right,
-            "jnge": left < right,
-            "jle": left <= right,
-            "jng": left <= right,
-            "jg": left > right,
-            "jnle": left > right,
-            "jge": left >= right,
-            "jnl": left >= right,
-        }
-        unsigned = {
-            "jb": z3.ULT(left, right),
-            "jnae": z3.ULT(left, right),
-            "jc": z3.ULT(left, right),
-            "jbe": z3.ULE(left, right),
-            "jna": z3.ULE(left, right),
-            "ja": z3.UGT(left, right),
-            "jnbe": z3.UGT(left, right),
-            "jae": z3.UGE(left, right),
-            "jnb": z3.UGE(left, right),
-            "jnc": z3.UGE(left, right),
-        }
-        if mnemonic in signed:
-            return signed[mnemonic]
-        if mnemonic in unsigned:
-            return unsigned[mnemonic]
+
+        if mnemonic in SIGNED_CONDITIONS:
+            return SIGNED_CONDITIONS[mnemonic](left, right)
+
+        if mnemonic in UNSIGNED_CONDITIONS:
+            return UNSIGNED_CONDITIONS[mnemonic](left, right)
+
         raise MamboError(f"unsupported conditional jump {mnemonic}")
 
     def symbolic_byte(self, index: int) -> z3.BitVecRef:
+        """Creates the Z3 symbolic variable for stdin[index]"""
         while len(self.input_symbols) <= index:
             self.input_symbols.append(z3.BitVec(f"stdin_{len(self.input_symbols)}", 8))
         return self.input_symbols[index]
 
     def hook(self, state: State, name: str) -> None:
+        """a crude simulation of libc i/o functions"""
         name = name.split("@")[0]
         if name in {"read", "__read_chk"}:
+            # fill requested buffer with next stdin symbols.
             destination = concrete(self.read_register(state, "rsi"), "read buffer")
             requested = concrete(self.read_register(state, "rdx"), "read size")
             count = min(requested, self.max_input - state.input_count)
@@ -271,6 +307,7 @@ class SymbolicExecutor:
             state.input_count += count
             self.write_register(state, "rax", bv(count, 64))
         elif name == "gets":
+            # gets() consumes the remaining input and appends a terminator.
             destination = concrete(self.read_register(state, "rdi"), "gets buffer")
             count = self.max_input - state.input_count
             for offset in range(count):
@@ -284,6 +321,7 @@ class SymbolicExecutor:
             self.write_memory(state, destination + count, bv(0, 8), 1)
             self.write_register(state, "rax", bv(destination, 64))
         elif name == "fgets":
+            # fgets() reserves one byte for its terminating NUL.
             destination = concrete(self.read_register(state, "rdi"), "fgets buffer")
             requested = concrete(self.read_register(state, "rsi"), "fgets size")
             count = max(0, min(requested - 1, self.max_input - state.input_count))
@@ -298,6 +336,7 @@ class SymbolicExecutor:
             self.write_memory(state, destination + count, bv(0, 8), 1)
             self.write_register(state, "rax", bv(destination, 64))
         elif name == "getchar":
+            # return one symbolic byte, or EOF after the input limit.
             if state.input_count >= self.max_input:
                 self.write_register(state, "eax", bv(0xFFFFFFFF, 32))
             else:
@@ -305,20 +344,29 @@ class SymbolicExecutor:
                 state.input_count += 1
                 self.write_register(state, "eax", z3.ZeroExt(24, value))
         elif name in self.OUTPUT_HOOKS:
+            # TODO: catch output
             self.write_register(state, "rax", bv(0, 64))
         else:
             raise MamboError(f"unsupported external call {name!r}")
 
     def execute_one(self, state: State) -> List[State]:
+        """decodes one instruction then simulates execution"""
+
+        # decode instruction and update executor state
         insn = self.decode(state.pc)
         if insn is None:
             return []
         state.steps += 1
         self.executed += 1
+
+        # shared updates across all instructions
         next_pc = insn.address + insn.size
         state.pc = next_pc
         self.write_register(state, "rip", bv(next_pc, 64))
+
         mnemonic, operands = insn.mnemonic, insn.operands
+
+        # === data movement instructions ===
         if mnemonic in {"nop", "endbr64"}:
             return [state]
         if mnemonic == "mov":
@@ -343,6 +391,8 @@ class SymbolicExecutor:
                 operands[0],
                 bv(self.memory_address(state, insn, operands[1]), operands[0].size * 8),
             )
+
+        # === stack ops ===
         elif mnemonic == "push":
             stack = concrete(self.read_register(state, "rsp"), "stack pointer") - 8
             self.write_register(state, "rsp", bv(stack, 64))
@@ -368,22 +418,27 @@ class SymbolicExecutor:
             state.pc = target
             self.write_register(state, "rsp", bv(stack + 8, 64))
         elif mnemonic == "call":
+            # execute call differently depending on userspace func or stdlib func
             target = concrete(
                 self.read_operand(state, insn, operands[0]), "call target"
             )
             hook_name = self.image.hooks.get(target)
             if hook_name:
+                # external calls are handled by hook's simulation
                 self.hook(state, hook_name)
             else:
+                # internal calls use the stack
                 stack = concrete(self.read_register(state, "rsp"), "stack pointer") - 8
                 self.write_register(state, "rsp", bv(stack, 64))
                 self.write_memory(state, stack, bv(next_pc, 64), 8)
                 state.pc = target
         elif mnemonic == "jmp":
+            # on jump simply update state pc -> jump target
             state.pc = concrete(
                 self.read_operand(state, insn, operands[0]), "jump target"
             )
         elif mnemonic.startswith("j"):
+            # fork conditional jumps and retain only satisfiable branches.
             target = concrete(
                 self.read_operand(state, insn, operands[0]), "jump target"
             )
@@ -399,6 +454,7 @@ class SymbolicExecutor:
                 successors.append(state)
             return successors
         elif mnemonic == "cmp":
+            # save comparison operands for the following conditional jump.
             left = self.read_operand(state, insn, operands[0])
             state.comparison = (
                 "cmp",
@@ -413,6 +469,7 @@ class SymbolicExecutor:
                 bv(0, left.size()),
             )
         elif mnemonic in {"add", "sub", "and", "or", "xor"}:
+            # simple integer ops: apply and write the results of integer operation to destination.
             left = self.read_operand(state, insn, operands[0])
             right = resize(self.read_operand(state, insn, operands[1]), left.size())
             self.write_operand(
@@ -428,6 +485,7 @@ class SymbolicExecutor:
                 }[mnemonic],
             )
         elif mnemonic == "imul":
+            # special imul operation
             if len(operands) == 2:
                 left, right = self.read_operand(state, insn, operands[0]), resize(
                     self.read_operand(state, insn, operands[1]),
@@ -442,6 +500,7 @@ class SymbolicExecutor:
                 raise MamboError(f"unsupported imul form: {insn.op_str}")
             self.write_operand(state, insn, operands[0], left * right)
         elif mnemonic in {"shl", "sal", "shr", "sar", "rol", "ror"}:
+            # rotation operations
             value = self.read_operand(state, insn, operands[0])
             count = concrete(self.read_operand(state, insn, operands[1]), "shift count")
             result = (
@@ -457,6 +516,7 @@ class SymbolicExecutor:
             )
             self.write_operand(state, insn, operands[0], result)
         elif mnemonic in {"inc", "dec"}:
+            # increment / decrement
             self.write_operand(
                 state,
                 insn,
@@ -465,6 +525,7 @@ class SymbolicExecutor:
                 + (1 if mnemonic == "inc" else -1),
             )
         elif mnemonic in {"cdqe", "cltq"}:
+            # sign extension
             self.write_register(
                 state, "rax", z3.SignExt(32, self.read_register(state, "eax"))
             )
@@ -475,10 +536,15 @@ class SymbolicExecutor:
         return [state]
 
     def solve(self, state: State, explored: int, started: float) -> ExecutionResult:
+        # Once we reach the target state we compile our accumulated list of constraints and check
+        # if it's mathematically satisfiable using z3.
+
         solver = z3.Solver()
         solver.add(*state.constraints)
         if solver.check() != z3.sat:
             raise MamboError("internal error: target state is unsatisfiable")
+
+        # Solution confirmed working, gather and return our execution results.
         model = solver.model()
         payload = bytes(
             model.eval(self.symbolic_byte(index), model_completion=True).as_long()
@@ -495,6 +561,7 @@ class SymbolicExecutor:
         while pending and explored < self.max_states:
             state = pending.pop()
             explored += 1
+
             while state.steps < self.max_steps:
                 if state.pc == self.end:
                     return self.solve(state, explored, started)

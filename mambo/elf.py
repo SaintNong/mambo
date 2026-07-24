@@ -1,4 +1,4 @@
-"""ELF parsing and memory access for the executor."""
+"""load ELF metadata and provide api for memory access for the execution engine"""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ from .models import Segment
 
 
 class ELFImage:
-    """The parts of an ELF file needed by the executor."""
+    """represent the executable parts of an ELF file."""
 
     def __init__(self, path: str | Path):
+        """load segments, symbols, and external function hooks from a binary."""
         self.path = Path(path)
         try:
             self._raw = self.path.read_bytes()
@@ -35,6 +36,7 @@ class ELFImage:
             if elf.header["e_type"] == "ET_DYN":
                 raise MamboError("PIE binaries are not supported; compile with -fno-pie -no-pie")
 
+            # Keep loadable segments for instruction and data memory access.
             for segment in elf.iter_segments():
                 if segment["p_type"] == "PT_LOAD":
                     self.segments.append(
@@ -46,6 +48,7 @@ class ELFImage:
                         )
                     )
 
+            # Index symbols both by address and by name for endpoint lookup.
             for section in elf.iter_sections():
                 if isinstance(section, SymbolTableSection):
                     for symbol in section.iter_symbols():
@@ -62,7 +65,7 @@ class ELFImage:
         }
 
     def symbol_address(self, name: str) -> int:
-        """Return the unique executable address for a symbol name."""
+        """return the executable address for a symbol name."""
         addresses = self.symbol_addresses.get(name, [])
         if not addresses:
             raise MamboError(f"symbol not found: {name}")
@@ -75,7 +78,7 @@ class ELFImage:
         return address
 
     def executable_symbols(self) -> List[tuple[str, int]]:
-        """Return uniquely named executable symbols and their addresses."""
+        """return uniquely named executable symbols and their addresses."""
         symbols = []
         for name, addresses in self.symbol_addresses.items():
             if len(addresses) == 1 and self.is_executable(addresses[0]):
@@ -83,6 +86,7 @@ class ELFImage:
         return sorted(symbols, key=lambda item: (item[1], item[0]))
 
     def _load_plt_hooks(self, elf: ELFFile) -> None:
+        """map PLT entry addresses to the external functions they call."""
         relocations: List[str] = []
         for section in elf.iter_sections():
             if not isinstance(section, RelocationSection) or ".plt" not in section.name:
@@ -109,6 +113,7 @@ class ELFImage:
             self.hooks[address] = name
 
     def read(self, address: int, size: int) -> bytes:
+        """read bytes from a mapped loadable segment."""
         for segment in self.segments:
             if segment.contains(address, size):
                 offset = address - segment.address
@@ -117,7 +122,9 @@ class ELFImage:
         raise MamboError(f"unmapped memory read at 0x{address:x}")
 
     def byte(self, address: int) -> int:
+        """read one byte from mapped memory."""
         return self.read(address, 1)[0]
 
     def is_executable(self, address: int) -> bool:
+        """return whether an address belongs to an executable segment."""
         return any(segment.executable and segment.contains(address) for segment in self.segments)
