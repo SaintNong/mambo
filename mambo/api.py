@@ -19,7 +19,7 @@ class Mambo:
     """Find stdin bytes that make an ELF execution reach a target address.
 
     Args:
-        binary: Path to a non-PIE x86-64 ELF binary.
+        binary: Path to a non-PIE x86 ELF binary (i386 or x86-64).
         max_input: Maximum number of symbolic stdin bytes.
         max_states: Maximum number of paths to explore.
         max_steps: Maximum instructions executed by each path.

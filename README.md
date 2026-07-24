@@ -31,7 +31,7 @@ You only really need two things to get started:
 
 If a path is found that connects your start and end addresses, Mambo solves the gathered constraints to provide the exact `stdin` payload required to reach the target.
 
-Mambo currently is best for non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are modeled as no-ops that always return zero; though their stdout is not captured during analysis. It supports the following arithmetic operations: addition, subtraction, bitwise AND/OR/XOR, signed multiplication (`imul`), increment/decrement, shifts, and rotations.
+Mambo currently is best for non-PIE x86 ELF crackmes (i386 or x86-64). It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are modeled as no-ops that always return zero; though their stdout is not captured during analysis. It supports the following arithmetic operations: addition, subtraction, bitwise AND/OR/XOR, signed multiplication (`imul`), increment/decrement, shifts, and rotations.
 
 ## Usage
 
@@ -89,7 +89,7 @@ solver = Mambo(
 
 | Argument | Description |
 |---|---|
-| `binary` | Path to a non-PIE x86-64 ELF binary |
+| `binary` | Path to a non-PIE x86 ELF binary (i386 or x86-64) |
 | `max_input` | Maximum number of symbolic stdin bytes |
 | `max_states` | Maximum number of paths to explore |
 | `max_steps` | Maximum instructions executed by each path |
@@ -131,7 +131,8 @@ See [`demo.py`](demo.py) for additional examples.
 
 ## Installation
 
-Prerequisites are python 3.x, and pip.
+Prerequisites are Python 3.x, pip, and a C compiler with i386 multilib support
+to build both included fixture architectures (on Debian/Ubuntu: `gcc-multilib`).
 
 Install the Python dependencies and build the included example:
 
@@ -151,24 +152,25 @@ make test PYTHON=.venv/bin/python
 
 ### Supported
 
-- Non-PIE x86-64 ELF binaries
+- Non-PIE x86 ELF binaries (i386 or x86-64)
 - Stack-local and mapped ELF memory
 - Direct `call`, `ret`, `jmp`, and conditional jumps (`je`/`jne` and signed or unsigned relational variants)
 - Basic data movement: `mov`, `movzx`, `movsx`, `movsxd`, and `lea`
-- Stack and control instructions: `push`, `pop`, `leave`, `nop`, and `endbr64`
+- Stack and control instructions: `push`, `pop`, `leave`, `nop`, `endbr64`, and `endbr32`
 - Integer operations: `add`, `sub`, `and`, `or`, `xor`, `imul`, `inc`, `dec`, shifts, and rotates
 - Comparisons with `cmp` and `test`
 - Symbolic input from `read`, `gets`, `fgets`, and `getchar`
 - Common output functions such as `write`, `puts`, `printf`, and `putchar` are modeled as no-ops returning zero
+- Relocated libc stream globals (`stdin`, `stdout`, and `stderr`) and `fflush` calls
 
 ### Not supported
 
 - stdout is not captured
-- PIE or non-x86-64 binaries
+- PIE or non-x86 binaries
 - Heap allocation, `malloc` and `free`
 - Indirect or unresolved calls
 - Symbolic memory addresses
 - Full operating-system or library behavior
-- Other x86-64 instructions, including `setcc`, `cmovcc`, `mul`/`div`, string instructions, SIMD instructions, and system calls
+- Other x86 instructions, including `setcc`, `cmovcc`, `mul`/`div`, string instructions, SIMD instructions, and system calls
 
 Keep in mind that not finding a path does not prove that no path exists.

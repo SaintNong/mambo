@@ -8,6 +8,27 @@ from typing import Dict, List, Optional, Tuple
 import z3
 
 
+@dataclass(frozen=True)
+class ArchitectureProfile:
+    """Execution details for one supported non-PIE x86 ELF variant."""
+
+    name: str
+    capstone_mode: int
+    address_bits: int
+    instruction_pointer: str
+    stack_pointer: str
+    frame_pointer: str
+    return_register: str
+    stack_slot_size: int
+    initial_stack: int
+    argument_registers: Tuple[str, ...]
+
+    @property
+    def address_mask(self) -> int:
+        """Mask used for architectural address wrapping."""
+        return (1 << self.address_bits) - 1
+
+
 @dataclass
 class Segment:
     address: int

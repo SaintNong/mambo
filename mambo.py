@@ -61,9 +61,13 @@ def print_symbols(solver: Mambo) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Find stdin bytes that reach an address in an x86-64 ELF")
+    parser = argparse.ArgumentParser(
+        description="Find stdin bytes that reach an address in a non-PIE x86 ELF"
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("--binary", required=True, help="non-PIE x86-64 ELF to analyze")
+    parser.add_argument(
+        "--binary", required=True, help="non-PIE i386 or x86-64 ELF to analyze"
+    )
     start = parser.add_mutually_exclusive_group()
     start.add_argument("--start", type=address, help="starting virtual address (for example 0x401176)")
     start.add_argument("--start-symbol", help="starting symbol name")

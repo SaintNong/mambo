@@ -3,3 +3,7 @@ __pycache__/
 *.py[cod]
 examples/simple_crackme
 examples/hash_crackme
+examples/simple_crackme_i386
+examples/hash_crackme_i386
+examples/stream_crackme
+examples/stream_crackme_i386

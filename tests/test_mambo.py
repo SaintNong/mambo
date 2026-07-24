@@ -2,14 +2,22 @@ import re
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 from mambo import Mambo, MamboError
+from mambo.elf import ELFImage
+from mambo.executor import SymbolicExecutor, bv, concrete
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "examples" / "simple_crackme"
+I386_BINARY = ROOT / "examples" / "simple_crackme_i386"
+HASH_BINARY = ROOT / "examples" / "hash_crackme"
+I386_HASH_BINARY = ROOT / "examples" / "hash_crackme_i386"
+STREAM_BINARY = ROOT / "examples" / "stream_crackme"
+I386_STREAM_BINARY = ROOT / "examples" / "stream_crackme_i386"
 
 
 def symbol_address(binary: Path, name: str) -> str:
@@ -67,8 +75,61 @@ class MamboEndToEndTests(unittest.TestCase):
         )
         self.assertIn("Payload (hex): 4d414d424f", completed.stdout)
 
+    def test_finds_i386_payload_and_payload_reaches_target(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                str(I386_BINARY),
+                "--start-symbol",
+                "main",
+                "--end-symbol",
+                "mambo_success",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        match = re.search(r"Payload \(hex\): ([0-9a-f]+)", completed.stdout)
+        self.assertIsNotNone(match, completed.stdout)
+        payload = bytes.fromhex(match.group(1))
+        self.assertEqual(payload, b"MAMBO")
+
+        crackme = subprocess.run(
+            [str(I386_BINARY)], input=payload, capture_output=True, check=True
+        )
+        self.assertEqual(crackme.stdout, b"Correct Key!\n")
+
+    def test_solves_relocated_stream_globals(self):
+        image = ELFImage(STREAM_BINARY)
+        self.assertEqual(set(image.external_object_slots.values()), {"stdin", "stdout"})
+
+        result = Mambo(STREAM_BINARY).solve_symbol("main", "mambo_stream_success")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.payload, b"MAMBO")
+        crackme = subprocess.run(
+            [str(STREAM_BINARY)], input=result.payload, capture_output=True, check=True
+        )
+        self.assertEqual(crackme.stdout, b"Stream accepted!\n")
+
+    def test_solves_i386_relocated_stream_globals(self):
+        result = Mambo(I386_STREAM_BINARY).solve_symbol("main", "mambo_stream_success")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.payload, b"MAMBO")
+        crackme = subprocess.run(
+            [str(I386_STREAM_BINARY)],
+            input=result.payload,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(crackme.stdout, b"Stream accepted!\n")
+
     def test_solves_looping_custom_hash(self):
-        binary = ROOT / "examples" / "hash_crackme"
+        binary = HASH_BINARY
         completed = subprocess.run(
             [
                 sys.executable,
@@ -93,6 +154,37 @@ class MamboEndToEndTests(unittest.TestCase):
 
         crackme = subprocess.run([str(binary)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"You guessed the password? No way\nHash accepted!\n")
+
+    def test_solves_looping_custom_hash_on_i386(self):
+        binary = I386_HASH_BINARY
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                str(binary),
+                "--start",
+                symbol_address(binary, "main"),
+                "--end",
+                symbol_address(binary, "mambo_hash_success"),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        match = re.search(r"Payload \(hex\): ([0-9a-f]+)", completed.stdout)
+        self.assertIsNotNone(match, completed.stdout)
+        payload = bytes.fromhex(match.group(1))
+        self.assertEqual(len(payload), 6)
+        self.assertTrue(payload.isalnum())
+
+        crackme = subprocess.run(
+            [str(binary)], input=payload, capture_output=True, check=True
+        )
+        self.assertEqual(
+            crackme.stdout, b"You guessed the password? No way\nHash accepted!\n"
+        )
 
     def test_reports_its_version_without_a_binary(self):
         completed = subprocess.run(
@@ -161,6 +253,47 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("PIE binaries are not supported", completed.stderr)
 
+    def test_loader_accepts_both_x86_variants_and_rejects_non_x86(self):
+        self.assertEqual(ELFImage(BINARY).architecture.name, "x86-64")
+        self.assertEqual(ELFImage(I386_BINARY).architecture.name, "i386")
+
+        # e_machine is the two-byte little-endian field at offset 18.  Rewriting
+        # a copy to EM_ARM produces a valid non-PIE but unsupported ELF header.
+        with tempfile.TemporaryDirectory() as directory:
+            unsupported = Path(directory) / "unsupported"
+            data = bytearray(BINARY.read_bytes())
+            data[18:20] = (40).to_bytes(2, "little")  # EM_ARM
+            unsupported.write_bytes(data)
+            with self.assertRaisesRegex(
+                MamboError, "i386 or x86-64"
+            ):
+                ELFImage(unsupported)
+
+    def test_i386_fgets_uses_cdecl_stack_arguments_and_eax_return(self):
+        image = ELFImage(I386_BINARY)
+        executor = SymbolicExecutor(
+            image,
+            int(symbol_address(I386_BINARY, "main"), 0),
+            int(symbol_address(I386_BINARY, "mambo_success"), 0),
+        )
+        state = executor.initial_state()
+        stack, destination = 0xFFFF_E000, 0xFFFF_D000
+        executor.write_register(state, "esp", bv(stack, 32))
+        executor.write_memory(state, stack, bv(destination, 32), 4)
+        executor.write_memory(state, stack + 4, bv(6, 32), 4)
+
+        executor.hook(state, "fgets")
+
+        self.assertEqual(state.input_count, 5)
+        self.assertEqual(
+            concrete(executor.read_register(state, "eax"), "fgets return"),
+            destination,
+        )
+        self.assertEqual(
+            concrete(executor.read_memory(state, destination + 5, 1), "terminator"),
+            0,
+        )
+
     def test_rejects_non_positive_execution_limits(self):
         completed = subprocess.run(
             [
@@ -206,6 +339,12 @@ class MamboApiTests(unittest.TestCase):
 
     def test_solves_named_symbols_through_the_public_api(self):
         result = Mambo(BINARY).solve_symbol("main", "mambo_success")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.payload, b"MAMBO")
+
+    def test_solves_i386_through_the_public_api(self):
+        result = Mambo(I386_BINARY).solve_symbol("main", "mambo_success")
 
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")

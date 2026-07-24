@@ -8,13 +8,27 @@ from typing import Dict, List
 from elftools.elf.elffile import ELFFile
 from elftools.elf.relocation import RelocationSection
 from elftools.elf.sections import SymbolTableSection
+from capstone import CS_MODE_32, CS_MODE_64
 
 from .errors import MamboError
-from .models import Segment
+from .models import ArchitectureProfile, Segment
+
+
+ARCHITECTURES = {
+    "x64": ArchitectureProfile(
+        "x86-64", CS_MODE_64, 64, "rip", "rsp", "rbp", "rax", 8,
+        0x7FFF_FFFF_F000,
+        ("rdi", "rsi", "rdx", "rcx", "r8", "r9"),
+    ),
+    "x86": ArchitectureProfile(
+        "i386", CS_MODE_32, 32, "eip", "esp", "ebp", "eax", 4,
+        0xFFFF_F000, (),
+    ),
+}
 
 
 class ELFImage:
-    """represent the executable parts of an ELF file."""
+    """Represent the executable parts of a non-PIE i386 or x86-64 ELF file."""
 
     def __init__(self, path: str | Path):
         """load segments, symbols, and external function hooks from a binary."""
@@ -28,11 +42,17 @@ class ELFImage:
         self.symbols: Dict[int, str] = {}
         self.symbol_addresses: Dict[str, List[int]] = {}
         self.hooks: Dict[int, str] = {}
+        self.external_object_slots: Dict[int, str] = {}
 
         with self.path.open("rb") as stream:
             elf = ELFFile(stream)
-            if elf.get_machine_arch() != "x64":
-                raise MamboError("only x86-64 ELF binaries are supported")
+            machine = elf.get_machine_arch()
+            try:
+                self.architecture = ARCHITECTURES[machine]
+            except KeyError as exc:
+                raise MamboError(
+                    "only non-PIE x86 ELF binaries (i386 or x86-64) are supported"
+                ) from exc
             if elf.header["e_type"] == "ET_DYN":
                 raise MamboError("PIE binaries are not supported; compile with -fno-pie -no-pie")
 
@@ -58,6 +78,7 @@ class ELFImage:
                             self.symbol_addresses.setdefault(symbol.name, []).append(address)
 
             self._load_plt_hooks(elf)
+            self._load_external_object_slots(elf)
 
         self.symbol_addresses = {
             name: sorted(set(addresses))
@@ -106,11 +127,27 @@ class ELFImage:
         if plt_sec is None:
             return
 
-        entry_size = int(plt_sec["sh_entsize"] or 16)
+        # GNU i386/x86-64 PLT stubs are 16 bytes.  Some i386 linkers report
+        # the instruction-alignment value (4) as ``sh_entsize`` for ``.plt``.
+        entry_size = 16
         base = int(plt_sec["sh_addr"])
         for index, name in enumerate(relocations):
             address = base + (index + (1 if reserved_entry else 0)) * entry_size
             self.hooks[address] = name
+
+    def _load_external_object_slots(self, elf: ELFFile) -> None:
+        """Find relocated libc stream-global pointers used by the executable."""
+        for section in elf.iter_sections():
+            if not isinstance(section, RelocationSection):
+                continue
+            symbols = elf.get_section(section["sh_link"])
+            for relocation in section.iter_relocations():
+                symbol = symbols.get_symbol(relocation["r_info_sym"])
+                if (
+                    symbol.name in {"stdin", "stdout", "stderr"}
+                    and symbol["st_info"]["type"] == "STT_OBJECT"
+                ):
+                    self.external_object_slots[int(relocation["r_offset"])] = symbol.name
 
     def read(self, address: int, size: int) -> bytes:
         """read bytes from a mapped loadable segment."""

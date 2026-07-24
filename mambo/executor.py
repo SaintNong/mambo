@@ -1,11 +1,11 @@
-"""Symbolic execution engine for supported x86-64 subset."""
+"""Symbolic execution engine for the supported i386 and x86-64 subsets."""
 
 from __future__ import annotations
 
 import time
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+from capstone import Cs, CS_ARCH_X86
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 import z3
 
@@ -45,15 +45,18 @@ UNSIGNED_CONDITIONS = {
     "jnc": z3.UGE,
 }
 
-# MAP: Register name -> 64-bit family name, visible width, LSB offset
-# lets executor model aliases like `eax` and `al` while storing one 64-bit value per register family
+# MAP: Register name -> family name, visible width, LSB offset.
+# This models aliases like `eax` and `al`; each family is stored at the active
+# architecture's native width.
 REGISTER_PARTS: Dict[str, Tuple[str, int, int]] = {}
+REGISTER_BASES: set[str] = set()
 
 
 def _register_family(
     base: str, dword: str, word: str, low: str, high: Optional[str] = None
 ) -> None:
     # register the alias to our global map
+    REGISTER_BASES.add(base)
     REGISTER_PARTS[base] = (base, 64, 0)
     REGISTER_PARTS[dword] = (base, 32, 0)
     REGISTER_PARTS[word] = (base, 16, 0)
@@ -73,6 +76,8 @@ _register_family("rsp", "esp", "sp", "spl")
 for _number in range(8, 16):
     _register_family(f"r{_number}", f"r{_number}d", f"r{_number}w", f"r{_number}b")
 REGISTER_PARTS["rip"] = ("rip", 64, 0)
+REGISTER_PARTS["eip"] = ("rip", 32, 0)
+REGISTER_BASES.add("rip")
 
 
 def bv(value: int, width: int) -> z3.BitVecRef:
@@ -101,10 +106,17 @@ def concrete(value: z3.BitVecRef, what: str) -> int:
 
 
 class SymbolicExecutor:
-    """Explores bounded, satisfiable x86-64 paths between two addresses"""
+    """Explores bounded, satisfiable i386 or x86-64 paths between two addresses."""
 
     INPUT_HOOKS = {"read", "__read_chk", "gets", "fgets", "getchar"}
-    OUTPUT_HOOKS = {"write", "puts", "printf", "__printf_chk", "putchar"}
+    OUTPUT_HOOKS = {
+        "write",
+        "puts",
+        "printf",
+        "__printf_chk",
+        "putchar",
+        "fflush",
+    }
 
     def __init__(
         self,
@@ -126,21 +138,53 @@ class SymbolicExecutor:
             max_states,
             max_steps,
         )
-        self.md = Cs(CS_ARCH_X86, CS_MODE_64)
+        self.architecture = image.architecture
+        self.md = Cs(CS_ARCH_X86, self.architecture.capstone_mode)
         self.md.detail = True
         self.input_symbols: List[z3.BitVecRef] = []
         self.executed = 0
+        libc_base = (
+            0x7FFF_0000_0000
+            if self.architecture.address_bits == 64
+            else 0xFF00_0000
+        )
+        self.external_object_addresses = {
+            name: libc_base + index * 0x100
+            for index, name in enumerate(sorted(set(image.external_object_slots.values())))
+        }
 
     def initial_state(self) -> State:
         """returns a starting CPU state"""
         registers = {
-            name: bv(0, 64) for name, width, _ in REGISTER_PARTS.values() if width == 64
+            name: bv(0, self.architecture.address_bits) for name in REGISTER_BASES
         }
-        stack = 0x7FFF_FFFF_F000
-        registers["rsp"] = bv(stack, 64)
-        registers["rip"] = bv(self.start, 64)
+        stack = self.architecture.initial_stack
+        registers["rsp"] = bv(stack, self.architecture.address_bits)
+        registers["rip"] = bv(self.start, self.architecture.address_bits)
         state = State(self.start, registers)
-        self.write_memory(state, stack, bv(0, 64), 8)
+        self.write_memory(
+            state,
+            stack,
+            bv(0, self.architecture.address_bits),
+            self.architecture.stack_slot_size,
+        )
+        # Dynamic ELF loaders normally relocate these slots to libc variables
+        # such as `stdin`.  Model each variable as one concrete pointer-sized
+        # cell containing a non-null opaque stream handle.
+        for slot, name in self.image.external_object_slots.items():
+            address = self.external_object_addresses[name]
+            self.write_memory(
+                state,
+                slot,
+                bv(address, self.architecture.address_bits),
+                self.architecture.stack_slot_size,
+            )
+            self.write_memory(
+                state,
+                address,
+                bv(address + self.architecture.stack_slot_size, self.architecture.address_bits),
+                self.architecture.stack_slot_size,
+            )
         return state
 
     def decode(self, address: int):
@@ -151,34 +195,48 @@ class SymbolicExecutor:
             return None
         return next(self.md.disasm(data, address, count=1), None)
 
+    def set_program_counter(self, state: State, address: int) -> None:
+        """Update the concrete program counter and its architectural register."""
+        address &= self.architecture.address_mask
+        state.pc = address
+        self.write_register(
+            state,
+            self.architecture.instruction_pointer,
+            bv(address, self.architecture.address_bits),
+        )
+
     def read_register(self, state: State, name: str) -> z3.BitVecRef:
         """read a register or one of its aliases."""
         try:
             base, width, offset = REGISTER_PARTS[name]
         except KeyError as exc:
             raise MamboError(f"unsupported register {name}") from exc
-        value = state.registers.get(base, bv(0, 64))
+        if width > self.architecture.address_bits:
+            raise MamboError(f"unsupported register {name}")
+        value = state.registers.get(base, bv(0, self.architecture.address_bits))
 
         return (
             value
-            if width == 64
+            if width == self.architecture.address_bits
             else z3.Extract(offset + width - 1, offset, value)
         )
 
     def write_register(self, state: State, name: str, value: z3.BitVecRef) -> None:
         """write a value to a register or one of its aliases."""
         base, width, offset = REGISTER_PARTS[name]
+        if width > self.architecture.address_bits:
+            raise MamboError(f"unsupported register {name}")
         value = resize(value, width)
-        if width == 64:
+        if width == self.architecture.address_bits:
             state.registers[base] = value
-        elif width == 32:
+        elif width == 32 and self.architecture.address_bits == 64:
             state.registers[base] = z3.ZeroExt(32, value)
         else:
-            old = state.registers.get(base, bv(0, 64))
-            high_size = 64 - offset - width
+            old = state.registers.get(base, bv(0, self.architecture.address_bits))
+            high_size = self.architecture.address_bits - offset - width
             pieces = []
             if high_size:
-                pieces.append(z3.Extract(63, offset + width, old))
+                pieces.append(z3.Extract(self.architecture.address_bits - 1, offset + width, old))
             pieces.append(value)
             if offset:
                 pieces.append(z3.Extract(offset - 1, 0, old))
@@ -206,26 +264,26 @@ class SymbolicExecutor:
                 )
                 * operand.mem.scale
             )
-        return address & ((1 << 64) - 1)
+        return address & self.architecture.address_mask
 
     def read_memory(self, state: State, address: int, size: int) -> z3.BitVecRef:
         """read a little-endian value from memory."""
         parts = []
         for offset in reversed(range(size)):
-            byte_value = state.memory.get(address + offset)
+            byte_address = (address + offset) & self.architecture.address_mask
+            byte_value = state.memory.get(byte_address)
             if byte_value is None:
-                byte_value = bv(self.image.byte(address + offset), 8)
+                byte_value = bv(self.image.byte(byte_address), 8)
             parts.append(byte_value)
         return parts[0] if len(parts) == 1 else z3.Concat(*parts)
 
-    @staticmethod
     def write_memory(
-        state: State, address: int, value: z3.BitVecRef, size: int
+        self, state: State, address: int, value: z3.BitVecRef, size: int
     ) -> None:
         """write a little-endian value to memory."""
         value = resize(value, size * 8)
         for offset in range(size):
-            state.memory[address + offset] = z3.Extract(
+            state.memory[(address + offset) & self.architecture.address_mask] = z3.Extract(
                 offset * 8 + 7, offset * 8, value
             )
 
@@ -235,7 +293,7 @@ class SymbolicExecutor:
         if operand.type == X86_OP_REG:
             return self.read_register(state, insn.reg_name(operand.reg))
         if operand.type == X86_OP_IMM:
-            return bv(operand.imm, width or 64)
+            return bv(operand.imm, width or self.architecture.address_bits)
         if operand.type == X86_OP_MEM:
             return self.read_memory(
                 state, self.memory_address(state, insn, operand), operand.size
@@ -262,7 +320,7 @@ class SymbolicExecutor:
         return solver.check() == z3.sat
 
     def condition(self, mnemonic: str, comparison) -> z3.BoolRef:
-        """Convert x86-64 conditional jump to z3 boolean constraint."""
+        """Convert an x86 conditional jump to a Z3 boolean constraint."""
         if comparison is None:
             raise MamboError(f"conditional jump {mnemonic} has no modeled cmp/test")
 
@@ -289,13 +347,32 @@ class SymbolicExecutor:
             self.input_symbols.append(z3.BitVec(f"stdin_{len(self.input_symbols)}", 8))
         return self.input_symbols[index]
 
+    def hook_argument(self, state: State, index: int) -> z3.BitVecRef:
+        """Return one integer/pointer argument using the active platform ABI."""
+        if self.architecture.argument_registers:
+            return self.read_register(state, self.architecture.argument_registers[index])
+        stack = concrete(
+            self.read_register(state, self.architecture.stack_pointer), "stack pointer"
+        )
+        return self.read_memory(
+            state, stack + index * self.architecture.stack_slot_size,
+            self.architecture.stack_slot_size,
+        )
+
+    def hook_return(self, state: State, value: int) -> None:
+        """Set an integer or pointer result in the active platform return register."""
+        self.write_register(
+            state, self.architecture.return_register,
+            bv(value, self.architecture.address_bits),
+        )
+
     def hook(self, state: State, name: str) -> None:
         """a crude simulation of libc i/o functions"""
         name = name.split("@")[0]
         if name in {"read", "__read_chk"}:
             # fill requested buffer with next stdin symbols.
-            destination = concrete(self.read_register(state, "rsi"), "read buffer")
-            requested = concrete(self.read_register(state, "rdx"), "read size")
+            destination = concrete(self.hook_argument(state, 1), "read buffer")
+            requested = concrete(self.hook_argument(state, 2), "read size")
             count = min(requested, self.max_input - state.input_count)
             for offset in range(count):
                 self.write_memory(
@@ -305,10 +382,10 @@ class SymbolicExecutor:
                     1,
                 )
             state.input_count += count
-            self.write_register(state, "rax", bv(count, 64))
+            self.hook_return(state, count)
         elif name == "gets":
             # gets() consumes the remaining input and appends a terminator.
-            destination = concrete(self.read_register(state, "rdi"), "gets buffer")
+            destination = concrete(self.hook_argument(state, 0), "gets buffer")
             count = self.max_input - state.input_count
             for offset in range(count):
                 self.write_memory(
@@ -319,11 +396,11 @@ class SymbolicExecutor:
                 )
             state.input_count += count
             self.write_memory(state, destination + count, bv(0, 8), 1)
-            self.write_register(state, "rax", bv(destination, 64))
+            self.hook_return(state, destination)
         elif name == "fgets":
             # fgets() reserves one byte for its terminating NUL.
-            destination = concrete(self.read_register(state, "rdi"), "fgets buffer")
-            requested = concrete(self.read_register(state, "rsi"), "fgets size")
+            destination = concrete(self.hook_argument(state, 0), "fgets buffer")
+            requested = concrete(self.hook_argument(state, 1), "fgets size")
             count = max(0, min(requested - 1, self.max_input - state.input_count))
             for offset in range(count):
                 self.write_memory(
@@ -334,7 +411,7 @@ class SymbolicExecutor:
                 )
             state.input_count += count
             self.write_memory(state, destination + count, bv(0, 8), 1)
-            self.write_register(state, "rax", bv(destination, 64))
+            self.hook_return(state, destination)
         elif name == "getchar":
             # return one symbolic byte, or EOF after the input limit.
             if state.input_count >= self.max_input:
@@ -345,7 +422,7 @@ class SymbolicExecutor:
                 self.write_register(state, "eax", z3.ZeroExt(24, value))
         elif name in self.OUTPUT_HOOKS:
             # TODO: catch output
-            self.write_register(state, "rax", bv(0, 64))
+            self.hook_return(state, 0)
         else:
             raise MamboError(f"unsupported external call {name!r}")
 
@@ -361,13 +438,12 @@ class SymbolicExecutor:
 
         # shared updates across all instructions
         next_pc = insn.address + insn.size
-        state.pc = next_pc
-        self.write_register(state, "rip", bv(next_pc, 64))
+        self.set_program_counter(state, next_pc)
 
-        mnemonic, operands = insn.mnemonic, insn.operands
+        mnemonic, operands = insn.mnemonic.removeprefix("notrack "), insn.operands
 
         # === data movement instructions ===
-        if mnemonic in {"nop", "endbr64"}:
+        if mnemonic in {"nop", "endbr64", "endbr32"}:
             return [state]
         if mnemonic == "mov":
             self.write_operand(
@@ -394,29 +470,75 @@ class SymbolicExecutor:
 
         # === stack ops ===
         elif mnemonic == "push":
-            stack = concrete(self.read_register(state, "rsp"), "stack pointer") - 8
-            self.write_register(state, "rsp", bv(stack, 64))
+            stack = (
+                concrete(
+                    self.read_register(state, self.architecture.stack_pointer),
+                    "stack pointer",
+                )
+                - self.architecture.stack_slot_size
+            ) & self.architecture.address_mask
+            self.write_register(
+                state, self.architecture.stack_pointer,
+                bv(stack, self.architecture.address_bits),
+            )
             self.write_memory(
-                state, stack, resize(self.read_operand(state, insn, operands[0]), 64), 8
+                state, stack,
+                resize(self.read_operand(state, insn, operands[0]), self.architecture.address_bits),
+                self.architecture.stack_slot_size,
             )
         elif mnemonic == "pop":
-            stack = concrete(self.read_register(state, "rsp"), "stack pointer")
-            self.write_operand(
-                state, insn, operands[0], self.read_memory(state, stack, 8)
+            stack = concrete(
+                self.read_register(state, self.architecture.stack_pointer), "stack pointer"
             )
-            self.write_register(state, "rsp", bv(stack + 8, 64))
+            self.write_operand(
+                state, insn, operands[0],
+                self.read_memory(state, stack, self.architecture.stack_slot_size),
+            )
+            self.write_register(
+                state, self.architecture.stack_pointer,
+                bv(
+                    stack + self.architecture.stack_slot_size,
+                    self.architecture.address_bits,
+                ),
+            )
         elif mnemonic == "leave":
-            stack = concrete(self.read_register(state, "rbp"), "frame pointer")
-            self.write_register(state, "rsp", bv(stack, 64))
-            self.write_register(state, "rbp", self.read_memory(state, stack, 8))
-            self.write_register(state, "rsp", bv(stack + 8, 64))
+            stack = concrete(
+                self.read_register(state, self.architecture.frame_pointer), "frame pointer"
+            )
+            self.write_register(
+                state, self.architecture.stack_pointer,
+                bv(stack, self.architecture.address_bits),
+            )
+            self.write_register(
+                state, self.architecture.frame_pointer,
+                self.read_memory(state, stack, self.architecture.stack_slot_size),
+            )
+            self.write_register(
+                state, self.architecture.stack_pointer,
+                bv(
+                    stack + self.architecture.stack_slot_size,
+                    self.architecture.address_bits,
+                ),
+            )
         elif mnemonic == "ret":
-            stack = concrete(self.read_register(state, "rsp"), "stack pointer")
-            target = concrete(self.read_memory(state, stack, 8), "return address")
+            stack = concrete(
+                self.read_register(state, self.architecture.stack_pointer), "stack pointer"
+            )
+            target = concrete(
+                self.read_memory(state, stack, self.architecture.stack_slot_size),
+                "return address",
+            )
             if target == 0:
                 return []
-            state.pc = target
-            self.write_register(state, "rsp", bv(stack + 8, 64))
+            self.set_program_counter(state, target)
+            cleanup = operands[0].imm if operands else 0
+            self.write_register(
+                state, self.architecture.stack_pointer,
+                bv(
+                    stack + self.architecture.stack_slot_size + cleanup,
+                    self.architecture.address_bits,
+                ),
+            )
         elif mnemonic == "call":
             # execute call differently depending on userspace func or stdlib func
             target = concrete(
@@ -428,14 +550,27 @@ class SymbolicExecutor:
                 self.hook(state, hook_name)
             else:
                 # internal calls use the stack
-                stack = concrete(self.read_register(state, "rsp"), "stack pointer") - 8
-                self.write_register(state, "rsp", bv(stack, 64))
-                self.write_memory(state, stack, bv(next_pc, 64), 8)
-                state.pc = target
+                stack = (
+                    concrete(
+                        self.read_register(state, self.architecture.stack_pointer),
+                        "stack pointer",
+                    )
+                    - self.architecture.stack_slot_size
+                ) & self.architecture.address_mask
+                self.write_register(
+                    state, self.architecture.stack_pointer,
+                    bv(stack, self.architecture.address_bits),
+                )
+                self.write_memory(
+                    state, stack, bv(next_pc, self.architecture.address_bits),
+                    self.architecture.stack_slot_size,
+                )
+                self.set_program_counter(state, target)
         elif mnemonic == "jmp":
             # on jump simply update state pc -> jump target
-            state.pc = concrete(
-                self.read_operand(state, insn, operands[0]), "jump target"
+            self.set_program_counter(
+                state,
+                concrete(self.read_operand(state, insn, operands[0]), "jump target"),
             )
         elif mnemonic.startswith("j"):
             # fork conditional jumps and retain only satisfiable branches.
@@ -444,7 +579,7 @@ class SymbolicExecutor:
             )
             condition = self.condition(mnemonic, state.comparison)
             taken = state.fork()
-            taken.pc = target
+            self.set_program_counter(taken, target)
             taken.constraints.append(condition)
             state.constraints.append(z3.Not(condition))
             successors = []
@@ -571,7 +706,7 @@ class SymbolicExecutor:
                 if not successors:
                     break
 
-                # take the first path, push alternatives to stack
+                # Always take the first branch and push alternatives to the stack.
                 state = successors[0]
                 pending.extend(successors[1:])
         return None
