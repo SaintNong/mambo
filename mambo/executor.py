@@ -279,7 +279,7 @@ class SymbolicExecutor:
         if solver.check() != z3.sat: raise MamboError("internal error: target state is unsatisfiable")
         model = solver.model()
         payload = bytes(model.eval(self.symbolic_byte(index), model_completion=True).as_long() for index in range(state.input_count))
-        return ExecutionResult(payload, state.constraints, explored, self.executed)
+        return ExecutionResult(payload, explored, self.executed)
 
     def execute(self) -> Optional[ExecutionResult]:
         pending, explored = [self.initial_state()], 0

@@ -46,6 +46,20 @@ class ExecutionResult:
     """The satisfying input and exploration metrics for a completed analysis."""
 
     payload: bytes
-    constraints: List[z3.BoolRef]
     explored_states: int
     executed_instructions: int
+
+    def __str__(self) -> str:
+        # this is enough useful context for users who just print(result)
+        payload_ascii = "".join(
+            chr(byte) if 32 <= byte <= 126 else "."
+            for byte in self.payload
+        )
+        return "\n".join(
+            (
+                f"Payload (hex): {self.payload.hex()}",
+                f"Payload (ASCII): {payload_ascii}",
+                f"Explored states: {self.explored_states}",
+                f"Executed instructions: {self.executed_instructions}",
+            )
+        )

@@ -50,6 +50,23 @@ class MamboEndToEndTests(unittest.TestCase):
         crackme = subprocess.run([str(BINARY)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"Correct Key!\n")
 
+    def test_defaults_to_main_with_end_symbol(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "mambo.py"),
+                "--binary",
+                str(BINARY),
+                "--end-symbol",
+                "mambo_success",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("Payload (hex): 4d414d424f", completed.stdout)
+
     def test_solves_looping_custom_hash(self):
         binary = ROOT / "examples" / "hash_crackme"
         completed = subprocess.run(
@@ -118,7 +135,9 @@ class MamboEndToEndTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
-        self.assertIn("Start address: End address:", completed.stdout)
+        self.assertIn("Detected executable symbols in [", completed.stdout)
+        self.assertIn("Start address or symbol [defaulted: main = ", completed.stdout)
+        self.assertIn("End address or symbol:", completed.stdout)
         self.assertIn("Payload (hex): 4d414d424f", completed.stdout)
 
     def test_rejects_pie_binary(self):
@@ -176,12 +195,24 @@ class MamboApiTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")
         self.assertGreater(result.explored_states, 0)
+        self.assertFalse(hasattr(result, "constraints"))
+        self.assertIn("Payload (hex): 4d414d424f", str(result))
+        self.assertIn("Explored states:", str(result))
 
     def test_solves_named_symbols_through_the_public_api(self):
-        result = Mambo(BINARY).solve_symbols("main", "mambo_success")
+        result = Mambo(BINARY).solve_symbol("main", "mambo_success")
 
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")
+
+    def test_defaults_to_main_for_single_endpoint(self):
+        solver = Mambo(BINARY)
+
+        address_result = solver.solve(int(symbol_address(BINARY, "mambo_success"), 0))
+        symbol_result = solver.solve_symbol("mambo_success")
+
+        self.assertEqual(address_result.payload, b"MAMBO")
+        self.assertEqual(symbol_result.payload, b"MAMBO")
 
     def test_public_api_validates_execution_limits(self):
         with self.assertRaisesRegex(MamboError, "execution limits must be positive"):

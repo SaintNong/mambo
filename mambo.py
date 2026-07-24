@@ -27,6 +27,39 @@ def printable_payload(payload: bytes) -> str:
     return "".join(chr(byte) if chr(byte) in string.printable and byte not in b"\\\r\n\t" else "." for byte in payload)
 
 
+def resolve_endpoint(value: str, solver: Mambo) -> int:
+    """Resolve an interactive endpoint as a hexadecimal address or symbol."""
+    if value.lower().startswith("0x"):
+        return address(value)
+    return solver.symbol_address(value)
+
+
+def prompt_endpoint(prompt: str, solver: Mambo, default: Optional[int] = None) -> int:
+    """Prompt until an endpoint resolves to an executable address."""
+    while True:
+        value = input(prompt).strip()
+        if not value:
+            if default is not None:
+                return default
+            print("error: an address or symbol is required", file=sys.stderr)
+            continue
+        try:
+            return resolve_endpoint(value, solver)
+        except (MamboError, argparse.ArgumentTypeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+
+
+def print_symbols(solver: Mambo) -> None:
+    """Display the executable symbols available for interactive selection."""
+    symbols = solver.symbols()
+    print(f"Detected executable symbols in [{solver.binary}]")
+    if not symbols:
+        print("  (none)")
+        return
+    for name, value in symbols:
+        print(f"  {name}: 0x{value:x}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Find stdin bytes that reach an address in an x86-64 ELF")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
@@ -47,13 +80,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if (args.start_symbol is None) != (args.end_symbol is None):
-        parser.error("--start-symbol and --end-symbol must be used together")
-
-    if args.start is None and args.start_symbol is None:
-        args.start = address(input("Start address: ").strip())
-    if args.end is None and args.end_symbol is None:
-        args.end = address(input("End address: ").strip())
 
     try:
         solver = Mambo(
@@ -62,9 +88,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             max_states=args.max_states,
             max_steps=args.max_steps,
         )
+        interactive = args.end is None and args.end_symbol is None
+        if interactive:
+            print_symbols(solver)
+
         if args.start_symbol is not None:
             args.start = solver.symbol_address(args.start_symbol)
+        elif args.start is None:
+            main_address = None
+            try:
+                main_address = solver.symbol_address("main")
+            except MamboError:
+                pass
+            if not interactive:
+                if main_address is None:
+                    raise MamboError("symbol not found: main; provide an explicit start address or symbol")
+                args.start = main_address
+            else:
+                default = f" [defaulted: main = 0x{main_address:x}]" if main_address is not None else ""
+                args.start = prompt_endpoint(f"Start address or symbol{default}: ", solver, main_address)
+
+        if args.end_symbol is not None:
             args.end = solver.symbol_address(args.end_symbol)
+        elif args.end is None:
+            args.end = prompt_endpoint("End address or symbol: ", solver)
+
         result = solver.solve(args.start, args.end)
     except (MamboError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

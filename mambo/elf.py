@@ -74,6 +74,14 @@ class ELFImage:
             raise MamboError(f"symbol {name!r} is not executable")
         return address
 
+    def executable_symbols(self) -> List[tuple[str, int]]:
+        """Return uniquely named executable symbols and their addresses."""
+        symbols = []
+        for name, addresses in self.symbol_addresses.items():
+            if len(addresses) == 1 and self.is_executable(addresses[0]):
+                symbols.append((name, addresses[0]))
+        return sorted(symbols, key=lambda item: (item[1], item[0]))
+
     def _load_plt_hooks(self, elf: ELFFile) -> None:
         relocations: List[str] = []
         for section in elf.iter_sections():

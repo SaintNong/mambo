@@ -10,7 +10,7 @@
 Mambo is a lightweight symbolic execution engine.
 Mainly made as a learning project, though intended to be useful to CTF players.
 
-## technology stack
+## Technology stack
 
 Mambo at its core is a combination of the following two libraries:
 - z3 for solving
@@ -22,78 +22,112 @@ Mambo at its core is a combination of the following two libraries:
 
 Mambo's primary function is basically angr but easier, from a CTF player perspective.
 
-You only really need three things to get started:
+You only really need two things to get started:
 
 1. A binary.
-2. The **start address** or symbol from which to begin exploration.
-3. The **end address** or symbol where we want to end up.
+2. The ending address or symbol where we want to end up.
 
 If a path is found that connects your start and end addresses, Mambo solves the gathered constraints to provide the exact `stdin` payload required to reach the target.
 
+Mambo currently is best for non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are modeled as no-ops that always return zero; though their stdout is not captured during analysis. It supports the following arithmetic operations: addition, subtraction, bitwise AND/OR/XOR, signed multiplication (`imul`), increment/decrement, shifts, and rotations.
 
 ## Usage
 
-Using Mambo is easy. Provide the target binary and either the hexadecimal start and end addresses or the corresponding symbol names.
+Using Mambo is easy. Provide the target binary and either the hex start and end addresses, or the corresponding symbol names.
 
-### Commands
+### Command Line
+
+> if anyone ever uses this please message me on discord because that would be hilarious
 
 ```bash
-python mambo.py --binary [TARGET_BINARY] --start [START_ADDRESS_HEX] --end [END_ADDRESS_HEX]
+# Easiest way
+python mambo.py --binary [TARGET_BINARY]
+# .. and an interactive CLI will ask you for start and end addresses/symbols
+#    it will even print all executable symbols in the binary
+
+# Using hex start/end
+python mambo.py --binary [TARGET_BINARY] --start [START_ADDR] --end [END_ADDR]
 
 # Or use symbol names
-python mambo.py --binary [TARGET_BINARY] --start-symbol [START_SYMBOL] --end-symbol [END_SYMBOL]
+python mambo.py --binary [TARGET_BINARY] --start-symbol [START] --end-symbol [END]
 
-# Or just 
-python mambo.py --binary [TARGET_BINARY]
-# .. and an interactive CLI will ask you for start and end addresses
 ```
 
-Mambo currently targets non-PIE x86-64 ELF crackmes. It models stack-local memory, direct calls/returns, comparisons and conditional jumps, plus symbolic stdin from `read`, `gets`, `fgets`, and `getchar`. Output calls such as `write` and `puts` are modeled as no-ops that return zero; their stdout is not captured during analysis. It supports the following arithmetic operations: addition, XOR, multiplication, shifts, and rotations.
 
 ### Python API
 
-> if anyone ever uses this please message me on discord because that would be hilarious (don't use this, get help)
-
-Use `Mambo` directly when embedding the solver in another tool. `solve()` returns an `ExecutionResult`, or `None` when no satisfiable path is found within the configured limits.
+Use `Mambo` directly when embedding the solver in a CTF-style solve script:
 
 ```python
 from mambo import Mambo
 
+# (make sure to run make first so this binary exists)
 solver = Mambo("examples/simple_crackme")
-result = solver.solve(0x40116b, 0x401156)
+result = solver.solve_symbol("mambo_success")
+
 if result is not None:
     print(result.payload)
-
-# Symbol names can be used instead
-result = solver.solve_symbols("main", "mambo_success")
 ```
 
-The `Mambo` constructor accepts the same `max_input`, `max_states`, and `max_steps` limits as the CLI. Invalid input, binary, and executor conditions raise `MamboError`.
+Use `solve_symbol` when the binary has useful symbols; use `solve` when working
+with disassembly addresses or to go to the middle of a function. If the start point is omitted, exploration
+begins at `main`.
 
-The included examples can be exercised using their named symbols:
+> [!NOTE]
+> omitted-start forms require an executable ELF symbol named `main`.
+> They can fail for fully stripped binaries or binaries with a custom entry point.
+> Use explicit start and end addresses with `solve(start, end)` when
+> `main` cannot be resolved.
 
-```bash
-.venv/bin/python mambo.py --binary examples/simple_crackme --start-symbol main --end-symbol mambo_success
+#### Creating a solver
 
-# Emit the satisfying payload as one JSON object for scripts
-.venv/bin/python mambo.py --json --binary examples/simple_crackme --start-symbol main --end-symbol mambo_success
-
-.venv/bin/python mambo.py --binary examples/hash_crackme --start-symbol main --end-symbol mambo_hash_success
-
+```python
+solver = Mambo(
+    "path/to/binary",
+    max_input=64,
+    max_states=1000,
+    max_steps=10_000,
+)
 ```
 
-Test the project with:
+| Argument | Description |
+|---|---|
+| `binary` | Path to a non-PIE x86-64 ELF binary |
+| `max_input` | Maximum number of symbolic stdin bytes |
+| `max_states` | Maximum number of paths to explore |
+| `max_steps` | Maximum instructions executed by each path |
 
-```bash
-make test PYTHON=.venv/bin/python
+#### Solving
+
+| Method | Arguments | Description |
+|---|---|---|
+| `solve(end)` | End address | Solve from `main` to an address |
+| `solve(start, end)` | Start and end addresses | Solve between two addresses |
+| `solve_symbol(end)` | End symbol | Solve from `main` to a symbol |
+| `solve_symbol(start, end)` | Start and end symbols | Solve between two symbols |
+
+Addresses are integers, for example `0x401156`. Symbols are strings, such as
+`"main"` or `"mambo_success"`.
+
+#### Results
+
+Each solve method returns an `ExecutionResult`, or `None` if no satisfiable path
+is found within the configured limits:
+
+```python
+result.payload
+result.explored_states
+result.executed_instructions
 ```
+
+Invalid arguments, binaries, or executor conditions raise `MamboError`.
+
+See [`demo.py`](demo.py) for additional examples.
+
 
 ## Installation
 
-### Prerequisites
-
-* Python 3.x
-* `pip` package manager
+Prerequisites are python 3.x, and pip.
 
 Install the Python dependencies and build the included example:
 
@@ -101,6 +135,12 @@ Install the Python dependencies and build the included example:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 make
+```
+
+Test the project with:
+
+```bash
+make test PYTHON=.venv/bin/python
 ```
 
 ## Limitations
