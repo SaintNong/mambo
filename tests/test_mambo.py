@@ -74,7 +74,7 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertEqual(len(payload), 6)
 
         crackme = subprocess.run([str(binary)], input=payload, capture_output=True, check=True)
-        self.assertEqual(crackme.stdout, b"Hash accepted!\n")
+        self.assertEqual(crackme.stdout, b"You guessed the password? No way\nHash accepted!\n")
 
     def test_reports_its_version_without_a_binary(self):
         completed = subprocess.run(

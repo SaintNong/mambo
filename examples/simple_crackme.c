@@ -1,16 +1,13 @@
-#include <stddef.h>
-#include <unistd.h>
+#include <stdio.h>
 
-/* Keep this as a distinct symbol so it is an easy symbolic-execution target. */
-__attribute__((noinline)) void mambo_success(void) {
-    static const char message[] = "Correct Key!\n";
-    (void)write(STDOUT_FILENO, message, sizeof(message) - 1);
+void mambo_success(void) {
+    puts("Correct Key!");
 }
 
 int main(void) {
-    char key[5];
+    char key[6];
 
-    if (read(STDIN_FILENO, key, sizeof(key)) != (ssize_t)sizeof(key))
+    if (fgets(key, sizeof(key), stdin) == NULL)
         return 1;
 
     if (key[0] != 'M')

@@ -1,11 +1,7 @@
+#include <stdio.h>
 #include <stdint.h>
-#include <unistd.h>
 
-/*
- * A small, deliberately non-cryptographic hash. Its loop, index mixing,
- * rotation, XOR, and modular addition exercise Mambo's symbolic CPU model.
- */
-__attribute__((noinline)) uint32_t mambo_hash(const unsigned char *data, size_t length) {
+uint32_t mambo_hash(const unsigned char *data, size_t length) {
     uint32_t hash = 0x13579bdfU;
 
     for (size_t index = 0; index < length; ++index) {
@@ -16,20 +12,23 @@ __attribute__((noinline)) uint32_t mambo_hash(const unsigned char *data, size_t 
     return hash;
 }
 
-__attribute__((noinline)) void mambo_hash_success(void) {
-    static const char message[] = "Hash accepted!\n";
-    (void)write(STDOUT_FILENO, message, sizeof(message) - 1);
+void mambo_hash_success(void) {
+    puts("Hash accepted!");
 }
 
 int main(void) {
-    unsigned char key[6];
+    unsigned char key[7];
 
-    if (read(STDIN_FILENO, key, sizeof(key)) != (ssize_t)sizeof(key))
+    if (fgets((char *)key, sizeof(key), stdin) == NULL)
         return 1;
-    /* Hash of the intentionally undisclosed six-byte key. */
-    if (mambo_hash(key, sizeof(key)) != 0x34999475U)
+    // guess the key
+    if (mambo_hash(key, sizeof(key)) != 0x34999475U) {
+        puts ("wrong");
         return 1;
+    } else {
+        puts("You guessed the password? No way");
 
-    mambo_hash_success();
-    return 0;
+        mambo_hash_success();
+        return 0;
+    }
 }
