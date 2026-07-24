@@ -2,13 +2,15 @@
 
 [![Tests](https://github.com/SaintNong/mambo/actions/workflows/test.yml/badge.svg)](https://github.com/SaintNong/mambo/actions/workflows/test.yml)
 
+Mambo is a lightweight symbolic execution engine.
+Mainly made as a learning project, though intended to be useful to CTF players.
+
 <div align="center">
+  <p>Some beautiful pictures of mambo.</p>
   <img src="img/mambo.jpg" alt="beautiful mambo" width="35%">
   <img src="img/mambo2.jpg" alt="beautiful mambo x2" width="45%">
 </div>
 
-Mambo is a lightweight symbolic execution engine.
-Mainly made as a learning project, though intended to be useful to CTF players.
 
 ## Technology stack
 
@@ -73,11 +75,6 @@ Use `solve_symbol` when the binary has useful symbols; use `solve` when working
 with disassembly addresses or to go to the middle of a function. If the start point is omitted, exploration
 begins at `main`.
 
-> [!NOTE]
-> omitted-start forms require an executable ELF symbol named `main`.
-> They can fail for fully stripped binaries or binaries with a custom entry point.
-> Use explicit start and end addresses with `solve(start, end)` when
-> `main` cannot be resolved.
 
 #### Creating a solver
 
@@ -109,6 +106,12 @@ solver = Mambo(
 Addresses are integers, for example `0x401156`. Symbols are strings, such as
 `"main"` or `"mambo_success"`.
 
+> [!NOTE]
+> omitted start require an executable ELF symbol named `main`.
+> This can fail for fully stripped binaries or binaries with a custom entry point.
+> Use explicit start and end addresses with `solve(start, end)` when
+> `main` cannot be resolved.
+
 #### Results
 
 Each solve method returns an `ExecutionResult`, or `None` if no satisfiable path
@@ -118,6 +121,7 @@ is found within the configured limits:
 result.payload
 result.explored_states
 result.executed_instructions
+result.elapsed_seconds
 ```
 
 Invalid arguments, binaries, or executor conditions raise `MamboError`.

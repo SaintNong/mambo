@@ -125,6 +125,8 @@ class MamboEndToEndTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["payload_hex"], "4d414d424f")
         self.assertIn("explored_states", result)
+        self.assertIsInstance(result["elapsed_seconds"], float)
+        self.assertGreaterEqual(result["elapsed_seconds"], 0.0)
 
     def test_prompts_for_missing_start_and_end_addresses(self):
         completed = subprocess.run(
@@ -195,9 +197,12 @@ class MamboApiTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")
         self.assertGreater(result.explored_states, 0)
+        self.assertIsInstance(result.elapsed_seconds, float)
+        self.assertGreaterEqual(result.elapsed_seconds, 0.0)
         self.assertFalse(hasattr(result, "constraints"))
         self.assertIn("Payload (hex): 4d414d424f", str(result))
         self.assertIn("Explored states:", str(result))
+        self.assertIn("Elapsed seconds:", str(result))
 
     def test_solves_named_symbols_through_the_public_api(self):
         result = Mambo(BINARY).solve_symbol("main", "mambo_success")

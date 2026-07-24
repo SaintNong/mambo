@@ -128,12 +128,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             "payload_ascii": printable_payload(result.payload),
             "explored_states": result.explored_states,
             "executed_instructions": result.executed_instructions,
+            "elapsed_seconds": result.elapsed_seconds,
         }))
     else:
         print(f"Reached 0x{args.end:x}")
         print(f"Payload (hex): {result.payload.hex()}")
         print(f"Payload (ASCII): {printable_payload(result.payload)}")
         print(f"Explored states: {result.explored_states}; executed instructions: {result.executed_instructions}")
+        print(f"Elapsed seconds: {result.elapsed_seconds:.6f}")
     return 0
 
 

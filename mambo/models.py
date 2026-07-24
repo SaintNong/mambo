@@ -48,6 +48,7 @@ class ExecutionResult:
     payload: bytes
     explored_states: int
     executed_instructions: int
+    elapsed_seconds: float
 
     def __str__(self) -> str:
         # this is enough useful context for users who just print(result)
@@ -61,5 +62,6 @@ class ExecutionResult:
                 f"Payload (ASCII): {payload_ascii}",
                 f"Explored states: {self.explored_states}",
                 f"Executed instructions: {self.executed_instructions}",
+                f"Elapsed seconds: {self.elapsed_seconds:.6f}",
             )
         )
