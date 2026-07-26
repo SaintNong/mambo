@@ -127,7 +127,7 @@ result.elapsed_seconds
 Invalid arguments, binaries, or executor conditions raise `MamboError`.
 
 See [`demo_solve_simple.py`](demo_solve_simple.py) and
-[`demo_solve_mambo_race.py`](demo_solve_mambo_race.py) for additional examples.
+[`demo_solve_race.py`](demo_solve_race.py) for additional examples.
 
 
 ## Installation
@@ -136,7 +136,7 @@ Prerequisites are Python 3.x, pip, and a C compiler. The default build targets
 x86-64; i386 multilib support (on Debian/Ubuntu: `gcc-multilib`) is only needed
 for the optional i386 targets.
 
-Install the Python dependencies and build the included example:
+Install the Python dependencies and build the native example binaries:
 
 ```bash
 python3 -m venv .venv
