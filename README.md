@@ -20,6 +20,12 @@ Mambo at its core is a combination of the following two libraries:
 
 > (it also uses pyelftools to parse ELF files and load their sections.)
 
+## Architecture
+
+<div align="center">
+  <img src="img/Architecture.png" alt="amazing architecture" width="85%">
+</div>
+
 ## What does this do?
 
 Mambo's primary function is basically angr but easier, from a CTF player perspective.
