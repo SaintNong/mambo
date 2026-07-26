@@ -132,8 +132,9 @@ See [`demo_solve_simple.py`](demo_solve_simple.py) and
 
 ## Installation
 
-Prerequisites are Python 3.x, pip, and a C compiler with i386 multilib support
-to build both included fixture architectures (on Debian/Ubuntu: `gcc-multilib`).
+Prerequisites are Python 3.x, pip, and a C compiler. The default build targets
+x86-64; i386 multilib support (on Debian/Ubuntu: `gcc-multilib`) is only needed
+for the optional i386 targets.
 
 Install the Python dependencies and build the included example:
 
@@ -143,11 +144,16 @@ python3 -m venv .venv
 make
 ```
 
+Build the optional i386 fixtures with `make all-i386`.
+
 Test the project with:
 
 ```bash
 make test PYTHON=.venv/bin/python
 ```
+
+Run the full x86-64 and i386 test suites with
+`make test-i386 PYTHON=.venv/bin/python`.
 
 ## Limitations
 

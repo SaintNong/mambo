@@ -1,5 +1,6 @@
 import re
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,10 @@ IF_BINARY = ROOT / "examples" / "if_crackme"
 I386_IF_BINARY = ROOT / "examples" / "if_crackme_i386"
 LICENSE_BINARY = ROOT / "examples" / "mambo_race_planner"
 I386_LICENSE_BINARY = ROOT / "examples" / "mambo_race_planner_i386"
+I386_TESTS = os.environ.get("MAMBO_TEST_I386") == "1"
+
+
+requires_i386 = unittest.skipUnless(I386_TESTS, "requires i386 multilib support")
 
 
 def symbol_address(binary: Path, name: str) -> str:
@@ -79,6 +84,7 @@ class MamboEndToEndTests(unittest.TestCase):
         )
         self.assertIn("Payload (hex): 4d414d424f", completed.stdout)
 
+    @requires_i386
     def test_finds_i386_payload_and_payload_reaches_target(self):
         completed = subprocess.run(
             [
@@ -130,6 +136,7 @@ class MamboEndToEndTests(unittest.TestCase):
         )
         self.assertEqual(crackme.stdout, b"you did it\n")
 
+    @requires_i386
     def test_explores_nested_if_crackme_on_i386(self):
         result = Mambo(I386_IF_BINARY).solve_symbol("main", "mambo_if_success")
 
@@ -170,6 +177,7 @@ class MamboEndToEndTests(unittest.TestCase):
             completed.stdout,
         )
 
+    @requires_i386
     def test_solves_realistic_license_verifier_on_i386(self):
         result = Mambo(I386_LICENSE_BINARY).solve_symbol(
             "main", "mambo_license_success"
@@ -179,6 +187,7 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertRegex(result.payload, rb"^MAMBO-(?:[STPG][0-9]){4}-[A-P]{2}$")
         self.assertGreater(result.explored_states, 100)
 
+    @requires_i386
     def test_solves_i386_relocated_stream_globals(self):
         result = Mambo(I386_STREAM_BINARY).solve_symbol("main", "mambo_stream_success")
 
@@ -219,6 +228,7 @@ class MamboEndToEndTests(unittest.TestCase):
         crackme = subprocess.run([str(binary)], input=payload, capture_output=True, check=True)
         self.assertEqual(crackme.stdout, b"You guessed the password? No way\nHash accepted!\n")
 
+    @requires_i386
     def test_solves_looping_custom_hash_on_i386(self):
         binary = I386_HASH_BINARY
         completed = subprocess.run(
@@ -317,6 +327,7 @@ class MamboEndToEndTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("PIE binaries are not supported", completed.stderr)
 
+    @requires_i386
     def test_loader_accepts_both_x86_variants_and_rejects_non_x86(self):
         self.assertEqual(ELFImage(BINARY).architecture.name, "x86-64")
         self.assertEqual(ELFImage(I386_BINARY).architecture.name, "i386")
@@ -333,6 +344,7 @@ class MamboEndToEndTests(unittest.TestCase):
             ):
                 ELFImage(unsupported)
 
+    @requires_i386
     def test_i386_fgets_uses_cdecl_stack_arguments_and_eax_return(self):
         image = ELFImage(I386_BINARY)
         executor = SymbolicExecutor(
@@ -407,6 +419,7 @@ class MamboApiTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.payload, b"MAMBO")
 
+    @requires_i386
     def test_solves_i386_through_the_public_api(self):
         result = Mambo(I386_BINARY).solve_symbol("main", "mambo_success")
 
