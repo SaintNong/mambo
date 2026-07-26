@@ -142,7 +142,7 @@ class SymbolicExecutor:
         self.md = Cs(CS_ARCH_X86, self.architecture.capstone_mode)
         self.md.detail = True
         self.input_symbols: List[z3.BitVecRef] = []
-        self.executed = 0
+        self.executed_instructions = 0
         libc_base = (
             0x7FFF_0000_0000
             if self.architecture.address_bits == 64
@@ -319,7 +319,7 @@ class SymbolicExecutor:
         solver.add(*constraints)
         return solver.check() == z3.sat
 
-    def condition(self, mnemonic: str, comparison) -> z3.BoolRef:
+    def branch_condition(self, mnemonic: str, comparison) -> z3.BoolRef:
         """Convert an x86 conditional jump to a Z3 boolean constraint."""
         if comparison is None:
             raise MamboError(f"conditional jump {mnemonic} has no modeled cmp/test")
@@ -347,7 +347,7 @@ class SymbolicExecutor:
             self.input_symbols.append(z3.BitVec(f"stdin_{len(self.input_symbols)}", 8))
         return self.input_symbols[index]
 
-    def hook_argument(self, state: State, index: int) -> z3.BitVecRef:
+    def external_call_argument(self, state: State, index: int) -> z3.BitVecRef:
         """Return one integer/pointer argument using the active platform ABI."""
         if self.architecture.argument_registers:
             return self.read_register(state, self.architecture.argument_registers[index])
@@ -359,20 +359,20 @@ class SymbolicExecutor:
             self.architecture.stack_slot_size,
         )
 
-    def hook_return(self, state: State, value: int) -> None:
+    def set_external_call_return(self, state: State, value: int) -> None:
         """Set an integer or pointer result in the active platform return register."""
         self.write_register(
             state, self.architecture.return_register,
             bv(value, self.architecture.address_bits),
         )
 
-    def hook(self, state: State, name: str) -> None:
+    def simulate_external_call(self, state: State, name: str) -> None:
         """a crude simulation of libc i/o functions"""
         name = name.split("@")[0]
         if name in {"read", "__read_chk"}:
             # fill requested buffer with next stdin symbols.
-            destination = concrete(self.hook_argument(state, 1), "read buffer")
-            requested = concrete(self.hook_argument(state, 2), "read size")
+            destination = concrete(self.external_call_argument(state, 1), "read buffer")
+            requested = concrete(self.external_call_argument(state, 2), "read size")
             count = min(requested, self.max_input - state.input_count)
             for offset in range(count):
                 self.write_memory(
@@ -382,10 +382,10 @@ class SymbolicExecutor:
                     1,
                 )
             state.input_count += count
-            self.hook_return(state, count)
+            self.set_external_call_return(state, count)
         elif name == "gets":
             # gets() consumes the remaining input and appends a terminator.
-            destination = concrete(self.hook_argument(state, 0), "gets buffer")
+            destination = concrete(self.external_call_argument(state, 0), "gets buffer")
             count = self.max_input - state.input_count
             for offset in range(count):
                 self.write_memory(
@@ -396,11 +396,11 @@ class SymbolicExecutor:
                 )
             state.input_count += count
             self.write_memory(state, destination + count, bv(0, 8), 1)
-            self.hook_return(state, destination)
+            self.set_external_call_return(state, destination)
         elif name == "fgets":
             # fgets() reserves one byte for its terminating NUL.
-            destination = concrete(self.hook_argument(state, 0), "fgets buffer")
-            requested = concrete(self.hook_argument(state, 1), "fgets size")
+            destination = concrete(self.external_call_argument(state, 0), "fgets buffer")
+            requested = concrete(self.external_call_argument(state, 1), "fgets size")
             count = max(0, min(requested - 1, self.max_input - state.input_count))
             for offset in range(count):
                 self.write_memory(
@@ -411,7 +411,7 @@ class SymbolicExecutor:
                 )
             state.input_count += count
             self.write_memory(state, destination + count, bv(0, 8), 1)
-            self.hook_return(state, destination)
+            self.set_external_call_return(state, destination)
         elif name == "getchar":
             # return one symbolic byte, or EOF after the input limit.
             if state.input_count >= self.max_input:
@@ -422,19 +422,19 @@ class SymbolicExecutor:
                 self.write_register(state, "eax", z3.ZeroExt(24, value))
         elif name in self.OUTPUT_HOOKS:
             # TODO: catch output
-            self.hook_return(state, 0)
+            self.set_external_call_return(state, 0)
         else:
             raise MamboError(f"unsupported external call {name!r}")
 
-    def execute_one(self, state: State) -> List[State]:
-        """decodes one instruction then simulates execution"""
+    def step(self, state: State) -> List[State]:
+        """execute one instruction and return satisfiable successors"""
 
         # decode instruction and update executor state
         insn = self.decode(state.pc)
         if insn is None:
             return []
         state.steps += 1
-        self.executed += 1
+        self.executed_instructions += 1
 
         # shared updates across all instructions
         next_pc = insn.address + insn.size
@@ -544,10 +544,10 @@ class SymbolicExecutor:
             target = concrete(
                 self.read_operand(state, insn, operands[0]), "call target"
             )
-            hook_name = self.image.hooks.get(target)
-            if hook_name:
-                # external calls are handled by hook's simulation
-                self.hook(state, hook_name)
+            external_name = self.image.hooks.get(target)
+            if external_name:
+                # external calls are handled by their simulation
+                self.simulate_external_call(state, external_name)
             else:
                 # internal calls use the stack
                 stack = (
@@ -577,7 +577,7 @@ class SymbolicExecutor:
             target = concrete(
                 self.read_operand(state, insn, operands[0]), "jump target"
             )
-            condition = self.condition(mnemonic, state.comparison)
+            condition = self.branch_condition(mnemonic, state.comparison)
             taken = state.fork()
             self.set_program_counter(taken, target)
             taken.constraints.append(condition)
@@ -670,7 +670,9 @@ class SymbolicExecutor:
             )
         return [state]
 
-    def solve(self, state: State, explored: int, started: float) -> ExecutionResult:
+    def solve_state(
+        self, state: State, explored_states: int, started_at: float
+    ) -> ExecutionResult:
         # Once we reach the target state we compile our accumulated list of constraints and check
         # if it's mathematically satisfiable using z3.
 
@@ -686,27 +688,31 @@ class SymbolicExecutor:
             for index in range(state.input_count)
         )
         return ExecutionResult(
-            payload, explored, self.executed, time.monotonic() - started
+            payload,
+            explored_states,
+            self.executed_instructions,
+            time.monotonic() - started_at,
         )
 
     def execute(self) -> Optional[ExecutionResult]:
         """DFS exploration of possible states until we reach the end, or run out of states"""
-        started = time.monotonic()
-        pending, explored = [self.initial_state()], 0
-        while pending and explored < self.max_states:
-            state = pending.pop()
-            explored += 1
+        started_at = time.monotonic()
+        pending_states, explored_states = [self.initial_state()], 0
+        while pending_states and explored_states < self.max_states:
+            state = pending_states.pop()
+            explored_states += 1
 
             while state.steps < self.max_steps:
                 if state.pc == self.end:
-                    return self.solve(state, explored, started)
+                    return self.solve_state(state, explored_states, started_at)
 
-                # Convert instruction at pc -> z3 constraints, then returns successor states.
-                successors = self.execute_one(state)
+                # execute one instruction and collect its successors
+                successors = self.step(state)
                 if not successors:
+                    # terminal state
                     break
 
-                # Always take the first branch and push alternatives to the stack.
+                # always take the first branch, alternatives go to stack (DFS).
                 state = successors[0]
-                pending.extend(successors[1:])
+                pending_states.extend(successors[1:])
         return None

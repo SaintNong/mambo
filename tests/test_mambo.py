@@ -282,7 +282,7 @@ class MamboEndToEndTests(unittest.TestCase):
         executor.write_memory(state, stack, bv(destination, 32), 4)
         executor.write_memory(state, stack + 4, bv(6, 32), 4)
 
-        executor.hook(state, "fgets")
+        executor.simulate_external_call(state, "fgets")
 
         self.assertEqual(state.input_count, 5)
         self.assertEqual(
