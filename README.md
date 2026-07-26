@@ -126,7 +126,8 @@ result.elapsed_seconds
 
 Invalid arguments, binaries, or executor conditions raise `MamboError`.
 
-See [`demo.py`](demo.py) for additional examples.
+See [`demo_solve_simple.py`](demo_solve_simple.py) and
+[`demo_solve_mambo_race.py`](demo_solve_mambo_race.py) for additional examples.
 
 
 ## Installation

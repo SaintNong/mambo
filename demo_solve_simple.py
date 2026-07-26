@@ -1,3 +1,5 @@
+"""Solve the simple character-checking crackme through Mambo's Python API."""
+
 from mambo import Mambo
 
 solver = Mambo("examples/simple_crackme")

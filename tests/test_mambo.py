@@ -18,6 +18,10 @@ HASH_BINARY = ROOT / "examples" / "hash_crackme"
 I386_HASH_BINARY = ROOT / "examples" / "hash_crackme_i386"
 STREAM_BINARY = ROOT / "examples" / "stream_crackme"
 I386_STREAM_BINARY = ROOT / "examples" / "stream_crackme_i386"
+IF_BINARY = ROOT / "examples" / "if_crackme"
+I386_IF_BINARY = ROOT / "examples" / "if_crackme_i386"
+LICENSE_BINARY = ROOT / "examples" / "mambo_race_planner"
+I386_LICENSE_BINARY = ROOT / "examples" / "mambo_race_planner_i386"
 
 
 def symbol_address(binary: Path, name: str) -> str:
@@ -114,6 +118,66 @@ class MamboEndToEndTests(unittest.TestCase):
             [str(STREAM_BINARY)], input=result.payload, capture_output=True, check=True
         )
         self.assertEqual(crackme.stdout, b"Stream accepted!\n")
+
+    def test_explores_nested_if_crackme(self):
+        result = Mambo(IF_BINARY).solve_symbol("main", "mambo_if_success")
+
+        self.assertIsNotNone(result)
+        self.assertIn(result.payload, {b"CAT", b"MAP"})
+        self.assertGreater(result.explored_states, 1)
+        crackme = subprocess.run(
+            [str(IF_BINARY)], input=result.payload, capture_output=True, check=True
+        )
+        self.assertEqual(crackme.stdout, b"you did it\n")
+
+    def test_explores_nested_if_crackme_on_i386(self):
+        result = Mambo(I386_IF_BINARY).solve_symbol("main", "mambo_if_success")
+
+        self.assertIsNotNone(result)
+        self.assertIn(result.payload, {b"CAT", b"MAP"})
+        self.assertGreater(result.explored_states, 1)
+
+    def test_solves_realistic_license_verifier(self):
+        result = Mambo(LICENSE_BINARY).solve_symbol(
+            "main", "mambo_license_success"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertRegex(result.payload, rb"^MAMBO-(?:[STPG][0-9]){4}-[A-P]{2}$")
+        self.assertGreater(result.explored_states, 100)
+        crackme = subprocess.run(
+            [str(LICENSE_BINARY)],
+            input=result.payload + b"\n2400 2 30\n",
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn(
+            b"Mambo license activated!\n", crackme.stdout
+        )
+        self.assertIn(b"Target pace: 12.50 seconds per 200m\n", crackme.stdout)
+        self.assertIn(b"Average speed: 57.60 km/h\n", crackme.stdout)
+
+    def test_rejects_invalid_mambo_license(self):
+        completed = subprocess.run(
+            [str(LICENSE_BINARY)],
+            input=b"not-a-license\n",
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn(
+            b"License rejected: that key is not registered with Mambo Enterprise.",
+            completed.stdout,
+        )
+
+    def test_solves_realistic_license_verifier_on_i386(self):
+        result = Mambo(I386_LICENSE_BINARY).solve_symbol(
+            "main", "mambo_license_success"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertRegex(result.payload, rb"^MAMBO-(?:[STPG][0-9]){4}-[A-P]{2}$")
+        self.assertGreater(result.explored_states, 100)
 
     def test_solves_i386_relocated_stream_globals(self):
         result = Mambo(I386_STREAM_BINARY).solve_symbol("main", "mambo_stream_success")
